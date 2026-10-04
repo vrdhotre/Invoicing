@@ -304,9 +304,18 @@ function calc(inv){
   const by=g=>inv.charges.map((c,ci)=>({c,ci})).filter(x=>x.c.group===g);
   k.taxable=by('taxable').map(x=>({...x,amt:chargeAmt(x.c,k,k.sub)}));
   k.E=r2(k.sub+k.taxable.reduce((a,x)=>a+x.amt,0));
-  const rates={};act.forEach(l=>{const g=+l.gst||0;rates[g]=(rates[g]||0)+lineAmt(l)});
+  /* GST is worked out per product rate: each rate gets its own goods value plus its pro-rata share of the taxable charges.
+     Only lines that actually carry an amount count, so an empty/half-filled entry can never add a rate row. */
+  const rates={};act.forEach(l=>{const a=lineAmt(l);if(!a)return;const g=+l.gst||0;rates[g]=(rates[g]||0)+a});
   const rl=Object.keys(rates).map(Number).sort((a,b)=>a-b);
-  k.gst=(rl.length?rl:[0]).map(g=>{const share=k.sub?(rates[g]||0)/k.sub:0;const base=k.E*share;return{rate:g,base:r2(base),amt:r2(base*g/100)}});
+  let used=0;
+  k.gst=(rl.length?rl:[0]).map((g,i,arr)=>{
+    const goods=r2(rates[g]||0);
+    /* last rate takes the remainder so the bases always add up exactly to E */
+    const base=i===arr.length-1?r2(k.E-used):r2(k.sub?k.E*goods/k.sub:0);
+    used=r2(used+base);
+    return{rate:g,goods,base,amt:r2(base*g/100)};
+  });
   k.F=r2(k.gst.reduce((a,x)=>a+x.amt,0));
   k.G=r2(k.E+k.F);
   k.expense=by('expense').map(x=>({...x,amt:chargeAmt(x.c,k,k.sub)}));
@@ -333,7 +342,7 @@ function buildRows(inv,k,forSheet){
   };
   k.taxable.forEach(addCharge);
   rows.push({kind:'sub',letter:letter(),label:'Total (Excluding GST)',amt:k.E});
-  k.gst.forEach(g=>rows.push({kind:'gst',letter:letter(),label:'GST Amount',note:'GST Rate '+rateTxt(g.rate)+'%',amt:g.amt}));
+  k.gst.forEach(g=>rows.push({kind:'gst',letter:letter(),label:'GST Amount',note:'GST Rate '+rateTxt(g.rate)+'% on '+money(g.base),amt:g.amt}));
   const gRow=rows[rows.length-1];
   const gl=letter();rows.push({kind:'sub',letter:gl,label:'Total (Including GST)',amt:k.G});
   let kl=null;
@@ -793,7 +802,7 @@ document.addEventListener('click',async e=>{
     case 'def-type':DB.settings.defaultTypeId=rid;writeDB();break;
     case 'add-party':{const i=$('#newParty');if(!i.value.trim())break;if(partyObj(i.value)){toast('That party already exists.',true);break}addParty(i.value);i.value='';renderParties();i.focus();break}
     case 'del-party':{const p=DB.parties.find(x=>x.id===rid);if(await ask(`Remove “${p.name}” from the party list? Saved bills keep their names.`,'Remove')){DB.parties=DB.parties.filter(x=>x.id!==rid);writeDB();renderParties()}break}
-    case 'add-prod':{DB.products.push({id:uid(),name:'New product',gst:5});writeDB();renderSec();break}
+    case 'add-prod':{DB.products.push({id:uid(),name:'New product',gst:0});writeDB();renderSec();break}
     case 'del-prod':{if(DB.products.length<2){toast('Keep at least one product.',true);break}const p=DB.products.find(x=>x.id===rid);if(await ask(`Remove product “${p.name}”?`,'Remove')){DB.products=DB.products.filter(x=>x.id!==rid);if(DB.defaultProductId===rid)DB.defaultProductId=DB.products[0].id;writeDB();renderSec()}break}
     case 'def-prod':DB.defaultProductId=rid;writeDB();break;
     case 'add-ch':DB.charges.push({id:uid(),name:'New charge',basis:b.dataset.g==='commission'?'percent':'perCount',rate:0,group:b.dataset.g,hideZero:false});writeDB();renderSec();break;
