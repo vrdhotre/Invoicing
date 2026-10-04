@@ -829,6 +829,27 @@ document.addEventListener('input',e=>{
     if(f==='party'){if(ddS&&ddS.input===t){ddS.typed=true;ddS.idx=-1;ddRender()}return}
     if(f==='pid')return;
     l[f]=numOrNull(t.value);
+    if(f){
+        const row=t.closest('.row'),l=cur.lines.find(x=>x.id===row.dataset.id);if(!l)return;
+        if(f==='party'){if(ddS&&ddS.input===t){ddS.typed=true;ddS.idx=-1;ddRender()}return}
+        if(f==='pid')return;
+        
+        l[f]=numOrNull(t.value);
+
+        // --- NEW AUTO-CALCULATION LOGIC ---
+        if (f === 'count' || f === 'factor') {
+            if (l.count != null && l.factor != null) {
+                // Calculates and rounds to 2 decimal places
+                l.qty = Math.round((l.count * l.factor / 100) * 100) / 100; 
+                const qtyInput = row.querySelector('[data-f="qty"]');
+                if (qtyInput) qtyInput.value = l.qty;
+            }
+        }
+        // ----------------------------------
+
+        const a=$('.amt',row);a.textContent=(l.qty!=null&&l.rate!=null)?money(lineAmt(l)):'';
+        updateTotals();persist();return;
+      }
     const a=$('.amt',row);a.textContent=(l.qty!=null&&l.rate!=null)?money(lineAmt(l)):'';
     updateTotals();persist();return;
   }
