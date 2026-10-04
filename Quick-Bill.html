@@ -1,0 +1,907 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Quick Bill</title>
+<style>
+/* Layout: ledger-style single column. Entry grid on top, charges that mirror the paper bill below, sticky total + action bar. */
+:root{
+  --bg:#eef1ee; --surface:#ffffff; --ink:#17221c; --muted:#5b6a61; --line:#d6ddd7; --field:#f9fbf9;
+  --accent:#1a6a44; --accent-ink:#ffffff; --accent-soft:#dff0e6; --warn:#a85200; --danger:#b3261e; --danger-soft:#fbe6e4;
+  --shadow:0 1px 2px rgba(20,40,30,.08),0 4px 14px rgba(20,40,30,.06);
+  --font:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans","Helvetica Neue",Arial,sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0e1511; --surface:#16201a; --ink:#e6eee8; --muted:#92a299; --line:#28352d; --field:#111a14;
+  --accent:#4fbf86; --accent-ink:#04140b; --accent-soft:#1b3326; --warn:#f0a35a; --danger:#ff8a80; --danger-soft:#3a1c1a;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 4px 14px rgba(0,0,0,.3);color-scheme:dark}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.4 var(--font);}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+[hidden]{display:none!important}
+.num,.amt,input[type=number]{font-variant-numeric:tabular-nums}
+
+/* top bar */
+.top{position:sticky;top:0;z-index:20;background:var(--surface);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;padding:8px 16px;flex-wrap:wrap}
+.brand{display:flex;flex-direction:column;line-height:1.15;min-width:0;margin-right:auto}
+.brand b{font-size:15px;letter-spacing:.04em;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.brand span{font-size:11px;color:var(--muted)}
+nav{display:flex;gap:4px}
+nav button{border:0;background:transparent;padding:8px 14px;border-radius:8px;font-weight:600;color:var(--muted)}
+nav button[aria-current=page]{background:var(--accent-soft);color:var(--accent)}
+nav button:hover{color:var(--ink)}
+main{max-width:1120px;margin:0 auto;padding:16px 16px 120px;display:flex;flex-direction:column;gap:14px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:14px 16px;min-width:0}
+.card h2{margin:0 0 10px;font-size:13px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:10px}
+.card h2 .sp{flex:1}
+.banner{background:var(--danger-soft);color:var(--danger);padding:8px 16px;font-weight:600;text-align:center}
+
+/* form controls */
+input[type=text],input[type=number],input[type=date],input[type=search],select,textarea{width:100%;background:var(--field);border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-height:38px;outline:none}
+input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent)}
+input.bad,select.bad{border-color:var(--danger);background:var(--danger-soft)}
+input[type=number]{-moz-appearance:textfield;text-align:right}
+input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.fld{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:600;min-width:0}
+.fld input,.fld select{color:var(--ink);font-weight:400;font-size:14px}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:8px 14px;font-weight:600;min-height:38px;white-space:nowrap}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.pri:hover{filter:brightness(1.08);color:var(--accent-ink)}
+.btn.dng{color:var(--danger)}
+.btn.sm{padding:4px 10px;min-height:30px;font-size:13px}
+.btn.ghost{border-color:transparent;background:transparent}
+.icon{width:34px;height:34px;display:grid;place-items:center;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--muted);font-size:16px;padding:0}
+.icon:hover{background:var(--accent-soft);color:var(--accent)}
+.icon.dng:hover{background:var(--danger-soft);color:var(--danger)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+/* bill details */
+.details{display:grid;grid-template-columns:1.2fr .8fr 1fr 2fr;gap:12px}
+.dateRow{display:flex;gap:6px}
+.dateRow .btn{align-self:flex-end}
+@media (max-width:860px){.details{grid-template-columns:1fr 1fr}.details .wide{grid-column:1/-1}}
+
+/* entries grid */
+.grid{--cols:34px minmax(170px,2.4fr) minmax(120px,1.2fr) 82px 66px 92px 104px 120px 72px}
+.hdr,.row{display:grid;grid-template-columns:var(--cols);gap:6px;align-items:center}
+.hdr{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:0 0 6px;border-bottom:1px solid var(--line);margin-bottom:6px}
+.hdr .r{text-align:right}
+.row{padding:3px 0;border-radius:8px}
+.row:hover{background:color-mix(in srgb,var(--accent-soft) 40%,transparent)}
+.c-n{color:var(--muted);text-align:center;font-size:12px}
+.f{display:block;min-width:0}
+.lab{display:none}
+.f-amt{text-align:right;font-weight:700;padding-right:4px}
+.c-act{display:flex;justify-content:flex-end}
+.tot{display:grid;grid-template-columns:var(--cols);gap:6px;align-items:center;border-top:2px solid var(--ink);margin-top:8px;padding-top:8px;font-weight:700}
+.tot .r{text-align:right;padding-right:4px}
+.addrow{margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.hint{color:var(--muted);font-size:12px}
+@media (max-width:860px){
+  .hdr{display:none}
+  .row{grid-template-columns:repeat(3,1fr);grid-template-areas:"p p a" "d d d" "c f q" "r m m";gap:8px;padding:12px;border:1px solid var(--line);margin-bottom:10px;background:var(--field)}
+  .row:hover{background:var(--field)}
+  .c-n{display:none}
+  .f-party{grid-area:p}.f-prod{grid-area:d}.f-count{grid-area:c}.f-factor{grid-area:f}.f-qty{grid-area:q}.f-rate{grid-area:r}.f-amt{grid-area:m;align-self:end;font-size:18px;padding-bottom:6px}.c-act{grid-area:a}
+  .lab{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:2px;text-align:left}
+  .f-amt .lab{text-align:right}
+  input[type=text],input[type=number],input[type=date],select{font-size:16px}
+  .tot{grid-template-columns:1fr 1fr 1fr 1fr;grid-auto-flow:row}
+  .tot .t-lbl{grid-column:1/-1}
+  .tot .t-gap,.tot>span:empty{display:none}
+  .tot .r::before{content:attr(data-l);display:block;font-size:10px;color:var(--muted);font-weight:600}
+}
+
+/* party dropdown */
+.dd{position:fixed;z-index:60;background:var(--surface);border:1px solid var(--accent);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.25);max-height:260px;overflow:auto;padding:4px}
+.dd div{padding:8px 10px;border-radius:6px;cursor:pointer;display:flex;justify-content:space-between;gap:10px}
+.dd div.on,.dd div:hover{background:var(--accent-soft)}
+.dd div.add{color:var(--accent);font-weight:700;border-top:1px solid var(--line);border-radius:0 0 6px 6px}
+.dd small{color:var(--muted)}
+.dd .none{color:var(--muted);cursor:default}
+
+/* charges panel */
+.srow{display:grid;grid-template-columns:30px minmax(0,1fr) minmax(0,1fr) 170px 140px;gap:8px;align-items:center;padding:5px 0;border-bottom:1px dashed var(--line)}
+.srow .s-l{color:var(--muted);font-weight:700;text-align:center}
+.srow .s-note{color:var(--muted);font-size:12.5px}
+.srow .s-rate{display:flex;align-items:center;gap:4px;justify-content:flex-end}
+.srow .s-rate input{width:90px;padding:5px 8px;min-height:32px}
+.srow .s-rate em{font-style:normal;color:var(--muted);font-size:12px;min-width:48px;white-space:nowrap}
+.srow .s-amt{text-align:right;font-variant-numeric:tabular-nums}
+.srow.sub{font-weight:700;background:color-mix(in srgb,var(--accent-soft) 55%,transparent)}
+.srow.ref{color:var(--muted)}
+.srow.total{font-weight:800;font-size:16px;background:var(--accent);color:var(--accent-ink);border-radius:8px;border:0;margin-top:8px;padding:10px 0}
+.srow.total .s-note,.srow.total .s-l{color:inherit;opacity:.85}
+@media (max-width:860px){.srow{grid-template-columns:26px 1fr 120px;grid-template-areas:"l n a" "l t r"}.srow .s-l{grid-area:l}.srow .s-name{grid-area:n}.srow .s-note{grid-area:t}.srow .s-rate{grid-area:r}.srow .s-amt{grid-area:a}}
+
+/* bottom bar */
+.bar{position:fixed;left:0;right:0;bottom:0;z-index:30;background:var(--surface);border-top:1px solid var(--line);box-shadow:0 -6px 20px rgba(0,0,0,.08);padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:center}
+.bar .bt{margin-right:auto;display:flex;flex-direction:column;line-height:1.1}
+.bar .bt span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.bar .bt b{font-size:22px;font-variant-numeric:tabular-nums}
+.bar .acts{display:flex;gap:6px;flex-wrap:wrap}
+.status{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--accent-soft);color:var(--accent);font-weight:700}
+.status.dirty{background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn)}
+@media (max-width:860px){.card h2 .hint{display:none}}
+@media (max-width:640px){main{padding-bottom:190px}.bar{justify-content:space-between}.bar .acts{width:100%;justify-content:space-between}.bar .acts .btn{flex:1;padding:8px 6px}.bar .bt{width:100%;flex-direction:row;justify-content:space-between;align-items:baseline}}
+
+/* lists / settings */
+table.t{width:100%;border-collapse:collapse}
+table.t th{text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:6px 8px;border-bottom:1px solid var(--line)}
+table.t td{padding:8px;border-bottom:1px solid var(--line);vertical-align:middle}
+table.t td.r,table.t th.r{text-align:right}
+.scroll{overflow-x:auto}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:6px 14px;font-weight:600}
+.chip[aria-current=true]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.stack{display:flex;flex-direction:column;gap:12px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.three{display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px}
+@media (max-width:700px){.two,.three{grid-template-columns:1fr}}
+.lrow{display:grid;gap:8px;align-items:center;padding:4px 0}
+.lrow.p{grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) 38px}
+.lrow.pr{grid-template-columns:minmax(0,2fr) 110px 80px 38px}
+.lrow.ty{grid-template-columns:minmax(0,1fr) 80px 38px}
+.lrow.ch{grid-template-columns:minmax(0,2fr) minmax(0,1.3fr) 100px 90px 34px 34px 34px}
+@media (max-width:760px){.lrow.p{grid-template-columns:1fr 1fr 38px}.lrow.p>:first-child{grid-column:1/-1}.lrow.ch{grid-template-columns:1fr 1fr 1fr}.lrow.ch>:first-child{grid-column:1/-1}.lrow.pr{grid-template-columns:1fr 90px 38px}}
+.check{display:flex;gap:8px;align-items:center;font-size:13px}
+.check input{width:18px;height:18px;accent-color:var(--accent)}
+.empty{padding:28px;text-align:center;color:var(--muted)}
+.tag{font-size:11px;background:var(--accent-soft);color:var(--accent);border-radius:6px;padding:2px 7px;font-weight:700}
+
+/* toasts + modal */
+#toasts{position:fixed;left:0;right:0;bottom:calc(90px + env(safe-area-inset-bottom,0px));z-index:80;display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none;padding:0 16px}
+.toast{background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:10px;box-shadow:var(--shadow);font-weight:600;max-width:560px}
+.toast.err{background:var(--danger);color:#fff}
+.mback{position:fixed;inset:0;z-index:70;background:rgba(10,20,15,.55);display:flex;align-items:flex-start;justify-content:center;padding:4vh 12px;overflow:auto}
+.mbox{background:var(--surface);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.4);width:100%;max-width:460px;padding:18px;display:flex;flex-direction:column;gap:12px}
+.mbox.wide{max-width:860px}
+.mbox h3{margin:0;font-size:17px}
+.mfoot{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.mfoot.sp{justify-content:space-between}
+.opt{display:flex;flex-direction:column;gap:8px}
+.opt .btn{text-align:left;display:block;text-decoration:none;color:var(--ink)}
+.opt .btn small{display:block;color:var(--muted);font-weight:400}
+.paperwrap{background:#9aa59f;border-radius:10px;padding:12px;overflow:hidden}
+.paper{background:#fff;color:#000;transform-origin:top left;width:788px;padding:24px;box-shadow:0 2px 12px rgba(0,0,0,.3)}
+
+/* printable sheet (always light) */
+.sheet{font:11.5px/1.35 "Segoe UI",Arial,Helvetica,sans-serif;color:#000;background:#fff;width:100%}
+.sheet h1{margin:0;text-align:center;font-size:24px;letter-spacing:.07em;text-transform:uppercase}
+.sheet .addr{text-align:center;font-size:12px}
+.sheet .ttl{margin:8px 0 6px;text-align:center;font-weight:700;font-size:14px;letter-spacing:.08em;border-top:1.5px solid #000;border-bottom:1.5px solid #000;padding:4px 0}
+.sheet .meta{display:flex;justify-content:space-between;margin-bottom:6px;font-weight:600}
+.sheet table{width:100%;border-collapse:collapse;margin-bottom:10px}
+.sheet th,.sheet td{border:1px solid #555;padding:3px 6px}
+.sheet th{background:#e7ebe8;font-weight:700;text-align:center}
+.sheet td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.sheet td.c{text-align:center}
+.sheet thead{display:table-header-group}
+.sheet tr{page-break-inside:avoid;break-inside:avoid}
+.sheet tr.sub td{font-weight:700;background:#f0f3f1}
+.sheet tr.total td{font-weight:800;font-size:14px;background:#dfe6e1}
+.sheet .keep{page-break-inside:avoid;break-inside:avoid}
+.sheet .words{margin:6px 0;font-weight:600}
+.sheet .sign{display:flex;justify-content:space-between;margin-top:34px;align-items:flex-end}
+.sheet .sign div{text-align:center}
+.sheet .foot{margin-top:10px;font-size:10.5px;color:#333}
+#printRoot{display:none}
+@page{size:A4;margin:12mm}
+@media print{
+  html,body{background:#fff}
+  #app,#dd,#toasts,#modal{display:none!important}
+  #printRoot{display:block}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <div class="brand"><b id="brandName"></b><span>Quick Bill</span></div>
+    <nav id="nav" aria-label="Sections">
+      <button data-nav="bill">New bill</button>
+      <button data-nav="history">History</button>
+      <button data-nav="settings">Settings</button>
+    </nav>
+  </header>
+  <div id="banner" class="banner" hidden>Browser storage is unavailable. Your work will not be remembered. Use Settings → Data → Export backup often.</div>
+  <main id="view"></main>
+  <div id="bar" class="bar" hidden></div>
+</div>
+<div id="dd" class="dd" hidden></div>
+<div id="toasts" aria-live="polite"></div>
+<div id="modal" class="mback" hidden></div>
+<div id="printRoot"></div>
+
+<script>
+(()=>{
+'use strict';
+/* ============================== utilities ============================== */
+const KEY='quickbill.v1';
+const $=(s,r=document)=>r.querySelector(s);
+const $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid=()=>Math.random().toString(36).slice(2,8)+Date.now().toString(36).slice(-4);
+const r2=x=>{const s=x<0?-1:1;return s*Math.round(Math.abs(x)*100+1e-6)/100};
+const nf2=new Intl.NumberFormat('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+const nf0=new Intl.NumberFormat('en-IN',{maximumFractionDigits:0});
+const money=n=>nf2.format(n||0);
+const cnt=n=>Number.isInteger(n)?nf0.format(n):nf2.format(n);
+const pad=n=>String(n).padStart(2,'0');
+const todayISO=()=>{const d=new Date();return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())};
+const fmtDate=iso=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(iso||'');return m?`${m[3]}/${m[2]}/${m[1]}`:(iso||'')};
+const clone=o=>JSON.parse(JSON.stringify(o));
+const numOrNull=v=>{if(v===''||v==null)return null;const n=parseFloat(v);return Number.isFinite(n)?n:null};
+const val=v=>v==null?'':v;
+const debounce=(f,ms)=>{let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>f(...a),ms)}};
+const rateTxt=n=>String(+(+n).toFixed(4));
+
+/* ============================== data ============================== */
+const SAMPLE_PARTIES=['Mohan Traders','Santoshkumar Gadgi','Maheshwari T.','Mahadev T. Co.','Vijaykumar Biradar','Vithal Trading Co.','Nagshetty Vaijnath','Sharnappa Kaplapur','Jai Jagadamba T.','Basawraj Malegaon','Guru Govindraj Swamy','S. D. Bellur','A. P. Sultanguru','Narsappa Allapur'];
+const SAMPLE_LINES=[['Mohan Traders',25,7,5725],['Santoshkumar Gadgi',6,11,5550],['Maheshwari T.',8,14,5681],['Mahadev T. Co.',16,8,5711],['Vijaykumar Biradar',36,4,5725],['Vithal Trading Co.',27,3,5750],['Vithal Trading Co.',15,8,5660],['Vithal Trading Co.',66,12,5945],['Vithal Trading Co.',40,11,5711],['Nagshetty Vaijnath',23,12,5925],['Nagshetty Vaijnath',24,3,5505],['Sharnappa Kaplapur',40,13,5981],['Sharnappa Kaplapur',11,5,5901],['Sharnappa Kaplapur',20,13,5850],['Sharnappa Kaplapur',13,10,5750],['Jai Jagadamba T.',11,7,5850],['Jai Jagadamba T.',16,12,5875],['Santoshkumar Gadgi',7,8,5721],['Basawraj Malegaon',6,8,5821],['Guru Govindraj Swamy',32,7,5705],['S. D. Bellur',16,5,5921],['S. D. Bellur',14,10,5875],['S. D. Bellur',6,6,5750],['S. D. Bellur',10,9,5851],['A. P. Sultanguru',50,11,5750],['A. P. Sultanguru',40,8,5880],['A. P. Sultanguru',14,14,5865],['Narsappa Allapur',27,10,5891]];
+const BASIS={percent:'% of subtotal',perCount:'per count',perQty:'per qty',flat:'flat amount'};
+const GROUPS={taxable:{title:'Charges added before GST (GST is also charged on these)',short:'Before GST'},expense:{title:'Expenses after GST (per count, not taxed)',short:'Expenses'},commission:{title:'Commission (% of Total incl. GST + Expenses)',short:'Commission'}};
+
+function seed(){
+  const prod={id:uid(),name:'Soya',gst:5};
+  const ch=(name,basis,rate,group)=>({id:uid(),name,basis,rate,group,hideZero:false});
+  const ty={id:uid(),name:'PURCHASE BILL'};
+  return{
+    settings:{business:{name:'HIBARE TRADERS',address:'APMC Yard, Bidar 585403',phone:'',gstin:'',footer:''},
+      invoiceTypes:[ty],defaultTypeId:ty.id,titleProducts:true,factor:49,prefix:'',nextNo:1,partySummary:false},
+    parties:SAMPLE_PARTIES.map(n=>({id:uid(),name:n,phone:'',gstin:'',used:0})),
+    products:[prod],defaultProductId:prod.id,
+    charges:[ch('Adat Commission','percent',2,'taxable'),ch('Market Fees','percent',0.6,'taxable'),ch('Batta','percent',0.5,'taxable'),ch('Dhadvai','perCount',0.75,'taxable'),
+             ch('Silvai and Sutali','perCount',5,'expense'),ch('Loading','perCount',8,'expense'),ch('Bardan','perCount',0,'expense'),
+             ch('Commission','percent',1,'commission')],
+    invoices:[],draft:null};
+}
+let storageOK=true;
+function readDB(){try{const t=localStorage.getItem(KEY);return t?JSON.parse(t):null}catch(e){storageOK=false;return null}}
+function writeDB(){try{localStorage.setItem(KEY,JSON.stringify(DB));}catch(e){storageOK=false;$('#banner').hidden=false}}
+let DB=readDB()||seed();
+if(!storageOK)$('#banner').hidden=false;
+
+/* current invoice state */
+let cur=null,curSaved=false,snap=null,view='bill',settingsSec='business',histQ='',partyQ='';
+function blankLine(prev){
+  const p=prev?DB.products.find(x=>x.id===prev.pid):null;
+  const prod=p||DB.products.find(x=>x.id===DB.defaultProductId)||DB.products[0];
+  return{id:uid(),party:prev?prev.party:'',pid:prod.id,pname:prod.name,gst:prod.gst,count:null,factor:DB.settings.factor,qty:null,rate:null};
+}
+function newInvoice(){
+  const s=DB.settings;const t=s.invoiceTypes.find(x=>x.id===s.defaultTypeId)||s.invoiceTypes[0];
+  return{id:uid(),no:s.prefix+s.nextNo,type:t?t.name:'INVOICE',date:todayISO(),remarks:'',lines:[blankLine()],charges:DB.charges.map(c=>({...c}))};
+}
+if(DB.draft&&DB.draft.inv){cur=DB.draft.inv;curSaved=!!DB.draft.saved;snap=DB.draft.snap||null}else{cur=newInvoice()}
+const persist=debounce(()=>{DB.draft={inv:cur,saved:curSaved,snap};writeDB();updateStatus()},250);
+const persistNow=()=>{DB.draft={inv:cur,saved:curSaved,snap};writeDB()};
+window.addEventListener('pagehide',persistNow);
+document.addEventListener('visibilitychange',()=>{if(document.hidden)persistNow()});
+
+/* ============================== calculation ============================== */
+const isActive=l=>l.count!=null||l.qty!=null||l.rate!=null;
+const lineAmt=l=>(l.qty!=null&&l.rate!=null)?r2(l.qty*l.rate):0;
+function chargeAmt(c,k,base){
+  const rate=+c.rate||0;
+  switch(c.basis){
+    case 'percent':return r2(base*rate/100);
+    case 'perCount':return r2(k.count*rate);
+    case 'perQty':return r2(k.qty*rate);
+    default:return r2(rate);
+  }
+}
+function calc(inv){
+  const act=inv.lines.filter(isActive);
+  const k={count:0,qty:0,sub:0};
+  act.forEach(l=>{k.count+=l.count||0;k.qty+=l.qty||0;k.sub+=lineAmt(l)});
+  k.qty=r2(k.qty);k.sub=r2(k.sub);k.avg=k.qty?k.sub/k.qty:0;
+  const by=g=>inv.charges.map((c,ci)=>({c,ci})).filter(x=>x.c.group===g);
+  k.taxable=by('taxable').map(x=>({...x,amt:chargeAmt(x.c,k,k.sub)}));
+  k.E=r2(k.sub+k.taxable.reduce((a,x)=>a+x.amt,0));
+  const rates={};act.forEach(l=>{const g=+l.gst||0;rates[g]=(rates[g]||0)+lineAmt(l)});
+  const rl=Object.keys(rates).map(Number).sort((a,b)=>a-b);
+  k.gst=(rl.length?rl:[0]).map(g=>{const share=k.sub?(rates[g]||0)/k.sub:0;const base=k.E*share;return{rate:g,base:r2(base),amt:r2(base*g/100)}});
+  k.F=r2(k.gst.reduce((a,x)=>a+x.amt,0));
+  k.G=r2(k.E+k.F);
+  k.expense=by('expense').map(x=>({...x,amt:chargeAmt(x.c,k,k.sub)}));
+  k.K=r2(k.expense.reduce((a,x)=>a+x.amt,0));
+  k.comm=by('commission').map(x=>({...x,amt:chargeAmt(x.c,k,k.G+k.K)}));
+  k.N=r2(k.comm.reduce((a,x)=>a+x.amt,0));
+  k.pre=r2(k.G+k.K+k.N);k.total=Math.round(k.pre);k.round=r2(k.total-k.pre);
+  k.act=act;return k;
+}
+function chargeInfo(c,k){
+  const r=rateTxt(c.rate||0);
+  if(c.basis==='percent')return{note:'',rate:r+'%'};
+  if(c.basis==='perCount')return{note:`${r} x ${cnt(k.count)}`,rate:r};
+  if(c.basis==='perQty')return{note:`${r} x ${nf2.format(k.qty)}`,rate:r};
+  return{note:'Flat',rate:r};
+}
+/* rows of the "additional charges" block, shared by the screen panel, the printed sheet and the PDF */
+function buildRows(inv,k,forSheet){
+  let L=0;const rows=[];
+  const letter=()=>{let n=L++,s='';do{s=String.fromCharCode(65+n%26)+s;n=Math.floor(n/26)-1}while(n>=0);return s};
+  const addCharge=x=>{
+    if(forSheet&&x.c.hideZero&&!(+x.c.rate))return;
+    const i=chargeInfo(x.c,k);rows.push({kind:'charge',letter:letter(),label:x.c.name,note:i.note,rate:i.rate,amt:x.amt,ci:x.ci,basis:x.c.basis});
+  };
+  k.taxable.forEach(addCharge);
+  rows.push({kind:'sub',letter:letter(),label:'Total (Excluding GST)',amt:k.E});
+  k.gst.forEach(g=>rows.push({kind:'gst',letter:letter(),label:'GST Amount',note:'GST Rate '+rateTxt(g.rate)+'%',amt:g.amt}));
+  const gRow=rows[rows.length-1];
+  const gl=letter();rows.push({kind:'sub',letter:gl,label:'Total (Including GST)',amt:k.G});
+  let kl=null;
+  if(k.expense.length){
+    k.expense.forEach(addCharge);
+    kl=letter();rows.push({kind:'sub',letter:kl,label:'Expense TOTAL',amt:k.K});
+    rows.push({kind:'ref',letter:letter(),label:'Total (Including GST)',note:'Row '+gl,amt:k.G});
+    rows.push({kind:'ref',letter:letter(),label:'Expense TOTAL',note:'Row '+kl,amt:k.K});
+  }
+  k.comm.forEach(addCharge);
+  rows.push({kind:'round',letter:letter(),label:'Round Off',amt:k.round});
+  rows.push({kind:'total',letter:letter(),label:'INVOICE TOTAL',amt:k.total,final:true});
+  return rows;
+}
+function billTitle(inv){
+  const names=[...new Set(calc(inv).act.map(l=>l.pname).filter(Boolean))];
+  return inv.type+(DB.settings.titleProducts&&names.length?' - '+names.join(', '):'');
+}
+function inWords(n){
+  n=Math.abs(n);let r=Math.floor(n),p=Math.round((n-r)*100);if(p===100){r++;p=0}
+  const o=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+  const t=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+  const two=x=>x<20?o[x]:t[Math.floor(x/10)]+(x%10?' '+o[x%10]:'');
+  const three=x=>(x>=100?o[Math.floor(x/100)]+' Hundred'+(x%100?' ':''):'')+(x%100?two(x%100):'');
+  const w=x=>{if(x===0)return'Zero';let s=[];const cr=Math.floor(x/1e7);x%=1e7;const lk=Math.floor(x/1e5);x%=1e5;const th=Math.floor(x/1e3);x%=1e3;
+    if(cr)s.push(three(cr)+' Crore');if(lk)s.push(two(lk)+' Lakh');if(th)s.push(two(th)+' Thousand');if(x)s.push(three(x));return s.join(' ')};
+  return 'Rupees '+w(r)+(p?' and '+w(p)+' Paise':'')+' Only';
+}
+
+/* ============================== printable sheet (HTML) ============================== */
+function sheetHTML(inv){
+  const k=calc(inv),B=DB.settings.business,rows=buildRows(inv,k,true);
+  const multi=new Set(k.act.map(l=>l.pname)).size>1;
+  const sub=[B.phone&&('Phone: '+B.phone),B.gstin&&('GSTIN: '+B.gstin)].filter(Boolean).join('    ');
+  const lines=k.act.map((l,i)=>`<tr><td class="c">${i+1}</td><td>${esc(l.party)}</td>${multi?`<td>${esc(l.pname)}</td>`:''}<td class="n">${l.count!=null?cnt(l.count):''}</td><td class="n">${l.count!=null?cnt(l.factor||0):''}</td><td class="n">${l.qty!=null?nf2.format(l.qty):''}</td><td class="n">${l.rate!=null?money(l.rate):''}</td><td class="n">${l.qty!=null&&l.rate!=null?money(lineAmt(l)):''}</td></tr>`).join('');
+  const span=multi?3:2;
+  const crow=rows.map(r=>`<tr class="${r.kind==='sub'||r.kind==='total'?r.kind:''}"><td class="c">${r.letter}</td><td colspan="2">${esc(r.label)}</td><td>${esc(r.note||'')}</td><td class="n">${r.kind==='charge'?esc(r.rate):''}</td><td class="n">${money(r.amt)}</td></tr>`).join('');
+  let psum='';
+  if(DB.settings.partySummary){
+    const m=new Map();k.act.forEach(l=>{const o=m.get(l.party)||{c:0,q:0,a:0};o.c+=l.count||0;o.q+=l.qty||0;o.a+=lineAmt(l);m.set(l.party,o)});
+    psum=`<div class="keep"><div style="font-weight:700;margin:4px 0">Party-wise summary</div><table><thead><tr><th>Party</th><th>Count</th><th>Qty</th><th>Amount</th></tr></thead><tbody>${[...m].map(([p,o])=>`<tr><td>${esc(p)}</td><td class="n">${cnt(o.c)}</td><td class="n">${nf2.format(o.q)}</td><td class="n">${money(r2(o.a))}</td></tr>`).join('')}</tbody></table></div>`;
+  }
+  return`<div class="sheet">
+  <h1>${esc(B.name)}</h1><div class="addr">${esc(B.address).replace(/\n/g,'<br>')}</div>${sub?`<div class="addr">${esc(sub)}</div>`:''}
+  <div class="ttl">${esc(billTitle(inv))}</div>
+  <div class="meta"><span>Bill No.: ${esc(inv.no)}</span><span>Date: ${fmtDate(inv.date)}</span></div>
+  <table><thead><tr><th style="width:36px">Sr.</th><th>Parties</th>${multi?'<th>Product</th>':''}<th>Count</th><th>Factor</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead>
+  <tbody>${lines}</tbody>
+  <tfoot><tr class="sub"><td></td><td${multi?' colspan="2"':''}>Subtotal</td><td class="n">${cnt(k.count)}</td><td></td><td class="n">${nf2.format(k.qty)}</td><td class="n">${money(k.avg)}</td><td class="n">${money(k.sub)}</td></tr></tfoot></table>
+  <table class="keep"><thead><tr><th colspan="4" style="text-align:left">ADDITIONAL CHARGES / TAXES</th><th>Basis / Rate</th><th>Amount</th></tr></thead><tbody>${crow}</tbody></table>
+  <div class="words">${esc(inWords(k.total))}</div>
+  ${inv.remarks?`<div><b>Remarks:</b> ${esc(inv.remarks)}</div>`:''}
+  ${psum}
+  <div class="sign keep"><div style="text-align:left;font-size:10.5px;color:#333">${esc(B.footer||'')}</div><div><b>For ${esc(B.name)}</b><br><br><br>Authorised Signatory</div></div>
+  </div>`;
+}
+
+/* ============================== minimal PDF writer (no libraries) ============================== */
+const HV=[278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
+const HB=[278,333,474,556,556,889,722,238,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,333,333,584,584,584,611,975,722,722,722,722,667,611,778,722,278,556,722,611,833,722,778,667,778,722,667,611,722,667,944,667,667,611,333,278,333,584,556,333,556,611,556,611,556,333,611,611,278,278,556,278,889,611,611,611,611,389,556,333,611,556,778,556,556,500,389,280,389,584];
+const tw=(s,b,z)=>{let w=0;for(const ch of s){const c=ch.charCodeAt(0);w+=((b?HB:HV)[c-32]??556)}return w*z/1000};
+const pdfEsc=s=>{let o='';for(const ch of s){const c=ch.charCodeAt(0);if(ch==='('||ch===')'||ch==='\\')o+='\\'+ch;else if(c<32)o+=' ';else if(c<127)o+=ch;else if(c<256)o+='\\'+c.toString(8).padStart(3,'0');else o+='?'}return o};
+class PDF{
+  constructor(){this.W=595.28;this.H=841.89;this.pages=[];this.add()}
+  add(){this.ops=[];this.pages.push(this.ops)}
+  txt(x,top,s,o={}){const z=o.size||9,b=!!o.bold;let X=x;const w=tw(s,b,z);if(o.align==='r')X=x-w;else if(o.align==='c')X=x-w/2;
+    this.ops.push(`BT /${b?'F2':'F1'} ${z} Tf ${X.toFixed(2)} ${(this.H-top).toFixed(2)} Td (${pdfEsc(s)}) Tj ET`)}
+  rect(x,top,w,h,fill){const y=(this.H-top-h).toFixed(2);if(fill!=null)this.ops.push(`${fill} g ${x.toFixed(2)} ${y} ${w.toFixed(2)} ${h.toFixed(2)} re f 0 g`);
+    this.ops.push(`0.5 w 0.35 G ${x.toFixed(2)} ${y} ${w.toFixed(2)} ${h.toFixed(2)} re S`)}
+  line(x1,t1,x2,t2,w){this.ops.push(`${w||0.8} w 0 G ${x1.toFixed(2)} ${(this.H-t1).toFixed(2)} m ${x2.toFixed(2)} ${(this.H-t2).toFixed(2)} l S`)}
+  fit(s,w,b,z){if(tw(s,b,z)<=w)return s;while(s.length>1&&tw(s+'..',b,z)>w)s=s.slice(0,-1);return s+'..'}
+  blob(){
+    const n=this.pages.length;
+    this.pages.forEach((ops,i)=>{ops.push(`BT /F1 8 Tf ${(this.W-36-tw(`Page ${i+1} of ${n}`,false,8)).toFixed(2)} 22 Td (Page ${i+1} of ${n}) Tj ET`)});
+    const objs=['<< /Type /Catalog /Pages 2 0 R >>',null,'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>'];
+    const kids=[];
+    this.pages.forEach(ops=>{const s=ops.join('\n');objs.push(`<< /Length ${s.length} >>\nstream\n${s}\nendstream`);const ci=objs.length;
+      objs.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${this.W} ${this.H}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${ci} 0 R >>`);kids.push(objs.length+' 0 R')});
+    objs[1]=`<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${kids.length} >>`;
+    let out='%PDF-1.4\n';const off=[];
+    objs.forEach((o,i)=>{off.push(out.length);out+=`${i+1} 0 obj\n${o}\nendobj\n`});
+    const x=out.length;out+=`xref\n0 ${objs.length+1}\n0000000000 65535 f \n`+off.map(o=>String(o).padStart(10,'0')+' 00000 n \n').join('')+`trailer\n<< /Size ${objs.length+1} /Root 1 0 R >>\nstartxref\n${x}\n%%EOF`;
+    const u=new Uint8Array(out.length);for(let i=0;i<out.length;i++)u[i]=out.charCodeAt(i)&255;
+    return new Blob([u],{type:'application/pdf'});
+  }
+}
+function pdfTexts(inv){const B=DB.settings.business;return[B.name,B.address,B.phone,B.gstin,B.footer,inv.no,inv.remarks,billTitle(inv),...inv.lines.flatMap(l=>[l.party,l.pname]),...inv.charges.map(c=>c.name)]}
+const pdfSafe=inv=>pdfTexts(inv).every(t=>!t||[...String(t)].every(c=>c.charCodeAt(0)<256));
+function buildPdf(inv){
+  const k=calc(inv),B=DB.settings.business,rows=buildRows(inv,k,true),p=new PDF();
+  const M=36,W=p.W-2*M,BOT=p.H-M-14,RH=15;let y=M;
+  const multi=new Set(k.act.map(l=>l.pname)).size>1;
+  p.txt(p.W/2,y+16,B.name.toUpperCase(),{size:18,bold:true,align:'c'});y+=24;
+  String(B.address||'').split('\n').forEach(a=>{p.txt(p.W/2,y+9,a,{size:9.5,align:'c'});y+=12});
+  const sub=[B.phone&&('Phone: '+B.phone),B.gstin&&('GSTIN: '+B.gstin)].filter(Boolean).join('     ');
+  if(sub){p.txt(p.W/2,y+9,sub,{size:9.5,align:'c'});y+=12}
+  y+=6;p.line(M,y,M+W,y,1.2);y+=16;p.txt(p.W/2,y,billTitle(inv),{size:11.5,bold:true,align:'c'});y+=7;p.line(M,y,M+W,y,1.2);y+=15;
+  p.txt(M,y,'Bill No.: '+inv.no,{size:9.5,bold:true});p.txt(M+W,y,'Date: '+fmtDate(inv.date),{size:9.5,bold:true,align:'r'});y+=8;
+  const wSr=26,wPr=multi?84:0,wCt=42,wFc=38,wQt=54,wRt=58,wAm=76,wPa=W-wSr-wPr-wCt-wFc-wQt-wRt-wAm;
+  const cols=[['Sr.',wSr,'c'],['Parties',wPa,'l'],...(multi?[['Product',wPr,'l']]:[]),['Count',wCt,'r'],['Factor',wFc,'r'],['Qty',wQt,'r'],['Rate',wRt,'r'],['Amount',wAm,'r']];
+  const rowOut=(cells,o={})=>{let x=M;cols.forEach((c,i)=>{p.rect(x,y,c[1],RH,o.fill);const t=cells[i]==null?'':String(cells[i]);
+      if(t){const s=p.fit(t,c[1]-8,o.bold,9);if(c[2]==='r')p.txt(x+c[1]-4,y+10.5,s,{bold:o.bold,align:'r'});else if(c[2]==='c')p.txt(x+c[1]/2,y+10.5,s,{bold:o.bold,align:'c'});else p.txt(x+4,y+10.5,s,{bold:o.bold})}x+=c[1]});y+=RH};
+  const head=()=>rowOut(cols.map(c=>c[0]),{fill:0.9,bold:true});
+  const need=h=>{if(y+h>BOT){p.add();y=M;return true}return false};
+  y+=6;head();
+  k.act.forEach((l,i)=>{if(need(RH)){head()}const c=[i+1,l.party];if(multi)c.push(l.pname);
+    c.push(l.count!=null?cnt(l.count):'',l.count!=null?cnt(l.factor||0):'',l.qty!=null?nf2.format(l.qty):'',l.rate!=null?money(l.rate):'',l.qty!=null&&l.rate!=null?money(lineAmt(l)):'');rowOut(c)});
+  if(need(RH)){head()}
+  const st=['','Subtotal'];if(multi)st.push('');st.push(cnt(k.count),'',nf2.format(k.qty),money(k.avg),money(k.sub));rowOut(st,{fill:0.94,bold:true});
+  y+=12;
+  /* charges block kept together */
+  if(need((rows.length+1)*RH+40)){}
+  const cw=[26,W-26-150-80-90,150,80,90];
+  const crow=(cells,o={})=>{let x=M;cw.forEach((w,i)=>{p.rect(x,y,w,RH,o.fill);const t=cells[i]==null?'':String(cells[i]);
+      if(t){const a=i>=3?'r':(i===0?'c':'l');const s=p.fit(t,w-8,o.bold,o.size||9);if(a==='r')p.txt(x+w-4,y+10.5,s,{bold:o.bold,align:'r',size:o.size});else if(a==='c')p.txt(x+w/2,y+10.5,s,{bold:o.bold,align:'c',size:o.size});else p.txt(x+4,y+10.5,s,{bold:o.bold,size:o.size})}x+=w});y+=RH};
+  crow(['','ADDITIONAL CHARGES / TAXES','','Basis / Rate','Amount'],{fill:0.9,bold:true});
+  rows.forEach(r=>crow([r.letter,r.label,r.note||'',r.kind==='charge'?r.rate:'',money(r.amt)],{bold:r.kind==='sub'||r.kind==='total',fill:r.kind==='total'?0.86:(r.kind==='sub'?0.94:null),size:r.kind==='total'?10.5:9}));
+  y+=16;
+  const words=inWords(k.total);const wl=[];let ln='';words.split(' ').forEach(w=>{if(tw(ln+' '+w,true,9.5)>W){wl.push(ln);ln=w}else ln=ln?ln+' '+w:w});wl.push(ln);
+  need(wl.length*13+(inv.remarks?16:0)+90);
+  wl.forEach(s=>{p.txt(M,y,s,{bold:true,size:9.5});y+=13});
+  if(inv.remarks){y+=3;p.txt(M,y,'Remarks: '+p.fit(inv.remarks,W-60,false,9),{size:9});y+=14}
+  if(DB.settings.partySummary){
+    const m=new Map();k.act.forEach(l=>{const o=m.get(l.party)||{c:0,q:0,a:0};o.c+=l.count||0;o.q+=l.qty||0;o.a+=lineAmt(l);m.set(l.party,o)});
+    y+=6;need(RH*3);p.txt(M,y+8,'Party-wise summary',{bold:true,size:9.5});y+=14;
+    const pc=[W-60-70-90,60,70,90];const prow=(c,o={})=>{let x=M;pc.forEach((w,i)=>{p.rect(x,y,w,RH,o.fill);const t=String(c[i]);if(i===0)p.txt(x+4,y+10.5,p.fit(t,w-8,o.bold,9),{bold:o.bold});else p.txt(x+w-4,y+10.5,t,{bold:o.bold,align:'r'});x+=w});y+=RH};
+    prow(['Party','Count','Qty','Amount'],{fill:0.9,bold:true});
+    [...m].forEach(([n,o])=>{if(y+RH>BOT){p.add();y=M;prow(['Party','Count','Qty','Amount'],{fill:0.9,bold:true})}prow([n,cnt(o.c),nf2.format(o.q),money(r2(o.a))])});
+  }
+  y+=30;if(y+70>BOT){p.add();y=M+10}
+  if(B.footer)p.txt(M,y+40,p.fit(B.footer,W/2,false,8.5),{size:8.5});
+  p.txt(M+W,y,'For '+B.name,{bold:true,size:10,align:'r'});p.txt(M+W,y+48,'Authorised Signatory',{size:9.5,align:'r'});
+  return p.blob();
+}
+
+/* ============================== exports & sharing ============================== */
+function fileBase(inv){return (inv.type+'_'+inv.no+'_'+inv.date).replace(/[^\w\-]+/g,'_')}
+function download(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500)}
+function csvOf(inv){
+  const k=calc(inv),q=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
+  const out=[[DB.settings.business.name],[billTitle(inv)],['Bill No.',inv.no,'Date',fmtDate(inv.date)],[],['Sr','Party','Product','Count','Factor','Qty','Rate','Amount']];
+  k.act.forEach((l,i)=>out.push([i+1,l.party,l.pname,l.count??'',l.count!=null?l.factor:'',l.qty??'',l.rate??'',lineAmt(l)]));
+  out.push(['','Subtotal','',k.count,'',k.qty,r2(k.avg),k.sub],[]);
+  buildRows(inv,k,true).forEach(r=>out.push([r.letter,r.label,r.note||'','','','',r.kind==='charge'?r.rate:'',r.amt]));
+  return '﻿'+out.map(r=>r.map(q).join(',')).join('\r\n');
+}
+function summaryText(inv){
+  const k=calc(inv),B=DB.settings.business;
+  return [`*${B.name}*`,billTitle(inv),`Bill No. ${inv.no}  |  Date ${fmtDate(inv.date)}`,'',
+    `Entries: ${k.act.length}   Count: ${cnt(k.count)}   Qty: ${nf2.format(k.qty)}`,`Subtotal: Rs. ${money(k.sub)}`,
+    `Total incl. GST: Rs. ${money(k.G)}`,`Expenses: Rs. ${money(k.K)}`,`*Invoice Total: Rs. ${nf0.format(k.total)}*`].join('\n');
+}
+function validate(inv){
+  const issues=[];
+  if(!calc(inv).act.length)issues.push({msg:'Add at least one entry first.'});
+  inv.lines.forEach((l,i)=>{if(!isActive(l))return;
+    if(!l.party.trim())issues.push({id:l.id,f:'party',msg:`Entry ${i+1}: choose a party.`});
+    if(l.qty==null)issues.push({id:l.id,f:'qty',msg:`Entry ${i+1}: enter the quantity.`});
+    if(l.rate==null)issues.push({id:l.id,f:'rate',msg:`Entry ${i+1}: enter the rate.`})});
+  if(!String(inv.no).trim())issues.push({msg:'Enter a bill number.',f2:'f-no'});
+  return issues;
+}
+function guard(){
+  const iss=validate(cur);if(!iss.length)return true;
+  go('bill');$$('.bad').forEach(e=>e.classList.remove('bad'));
+  iss.forEach(i=>{const row=i.id&&$(`.row[data-id="${i.id}"]`);const el=row?row.querySelector(`[data-f="${i.f}"]`):(i.f2&&$('#'+i.f2));el&&el.classList.add('bad')});
+  const first=$('.bad');if(first){first.scrollIntoView({block:'center',behavior:'smooth'});first.focus({preventScroll:true})}
+  toast(iss[0].msg+(iss.length>1?` (+${iss.length-1} more)`:''),true);return false;
+}
+
+/* ============================== UI helpers ============================== */
+function toast(msg,err){const t=document.createElement('div');t.className='toast'+(err?' err':'');t.textContent=msg;$('#toasts').appendChild(t);setTimeout(()=>t.remove(),err?4500:2400)}
+function openModal(html,wide){const m=$('#modal');m.innerHTML=`<div class="mbox${wide?' wide':''}" role="dialog" aria-modal="true">${html}</div>`;m.hidden=false}
+function closeModal(){$('#modal').hidden=true;$('#modal').innerHTML=''}
+function ask(msg,okLabel='Yes',danger=true){return new Promise(res=>{
+  openModal(`<h3>${esc(msg)}</h3><div class="mfoot"><button class="btn" data-m="no">Cancel</button><button class="btn ${danger?'dng':'pri'}" data-m="yes" id="askOk">${esc(okLabel)}</button></div>`);
+  const m=$('#modal');const h=e=>{const b=e.target.closest('[data-m]');if(!b&&e.target!==m)return;m.removeEventListener('click',h);closeModal();res(!!b&&b.dataset.m==='yes')};
+  m.addEventListener('click',h);$('#askOk').focus()})}
+function hasWork(){return calc(cur).act.length>0&&JSON.stringify(cur)!==snap}
+
+/* party dropdown */
+const dd=$('#dd');let ddS=null;
+const partyObj=n=>DB.parties.find(p=>p.name.trim().toLowerCase()===n.trim().toLowerCase());
+function ddItems(q,typed){
+  q=q.trim().toLowerCase();let list=[...DB.parties];
+  if(typed&&q){list=list.filter(p=>p.name.toLowerCase().includes(q)).sort((a,b)=>(b.name.toLowerCase().startsWith(q)-a.name.toLowerCase().startsWith(q))||(b.used-a.used)||a.name.localeCompare(b.name))}
+  else list.sort((a,b)=>(b.used-a.used)||a.name.localeCompare(b.name));
+  const items=list.slice(0,80).map(p=>({t:'p',name:p.name}));
+  if(typed&&q&&!partyObj(q))items.push({t:'add',name:ddS.input.value.trim()});
+  return items;
+}
+function ddRender(){
+  const s=ddS;s.items=ddItems(s.input.value,s.typed);
+  if(s.typed&&s.idx<0&&s.items.length)s.idx=0;
+  if(s.idx>=s.items.length)s.idx=s.items.length-1;
+  dd.innerHTML=s.items.length?s.items.map((it,i)=>it.t==='add'?`<div class="add${i===s.idx?' on':''}" data-i="${i}">+ Add “${esc(it.name)}” as new party</div>`:`<div class="${i===s.idx?'on':''}" data-i="${i}">${esc(it.name)}</div>`).join(''):'<div class="none">No parties yet. Type a name to add one.</div>';
+  const r=s.input.getBoundingClientRect();const vh=window.innerHeight;const below=vh-r.bottom;
+  dd.hidden=false;dd.style.left=Math.max(8,Math.min(r.left,window.innerWidth-Math.max(r.width,240)-8))+'px';dd.style.width=Math.max(r.width,240)+'px';
+  if(below<200&&r.top>below){dd.style.top='auto';dd.style.bottom=(vh-r.top+4)+'px';dd.style.maxHeight=Math.min(260,r.top-12)+'px'}
+  else{dd.style.bottom='auto';dd.style.top=(r.bottom+4)+'px';dd.style.maxHeight=Math.max(120,Math.min(260,below-12))+'px'}
+  const on=$('.on',dd);if(on)on.scrollIntoView({block:'nearest'});
+}
+function ddOpen(input){ddS={input,idx:-1,typed:false,items:[]};ddRender()}
+function ddClose(){ddS=null;dd.hidden=true}
+function addParty(name){
+  name=name.trim();let p=partyObj(name);if(p)return p;
+  p={id:uid(),name,phone:'',gstin:'',used:0};DB.parties.push(p);writeDB();toast(`Added party “${name}”`);return p;
+}
+function commitParty(item,moveOn){
+  const s=ddS;if(!s)return;const input=s.input,row=input.closest('.row');const l=cur.lines.find(x=>x.id===row.dataset.id);
+  let name=item?item.name:(l?l.party:'');
+  if(item){const p=item.t==='add'?addParty(item.name):partyObj(item.name);if(p){name=p.name;p.used=Date.now()}}
+  if(l)l.party=name;input.value=name;input.classList.remove('bad');ddClose();persist();
+  if(moveOn)focusField(row,'count');
+}
+function focusField(row,f){const el=row&&row.querySelector(`[data-f="${f}"]`);if(el){el.focus();if(el.select)el.select()}}
+
+/* ============================== views ============================== */
+const viewEl=$('#view');
+function go(v){
+  if(view==='settings'&&v!=='settings')syncDraft();
+  view=v;$$('#nav button').forEach(b=>b.setAttribute('aria-current',b.dataset.nav===v?'page':'false'));
+  $('#bar').hidden=v!=='bill';
+  if(v==='bill')renderEditor();else if(v==='history')renderHistory();else renderSettings();
+  window.scrollTo({top:0});
+}
+function syncDraft(){
+  /* keep an unsaved bill in step with changes made in settings */
+  $('#brandName').textContent=DB.settings.business.name;
+  if(curSaved)return;
+  cur.charges=DB.charges.map(c=>({...c}));
+  if(!DB.settings.invoiceTypes.some(t=>t.name===cur.type)){const t=DB.settings.invoiceTypes.find(x=>x.id===DB.settings.defaultTypeId)||DB.settings.invoiceTypes[0];if(t)cur.type=t.name}
+  cur.lines.forEach(l=>{const p=DB.products.find(x=>x.id===l.pid);if(p){l.pname=p.name;l.gst=p.gst}else{const d=DB.products.find(x=>x.id===DB.defaultProductId)||DB.products[0];l.pid=d.id;l.pname=d.name;l.gst=d.gst}});
+  cur.lines.forEach(l=>{if(!isActive(l)&&l.count==null)l.factor=DB.settings.factor});
+  persist();
+}
+
+/* ---- editor ---- */
+function lineHTML(l,i){
+  const many=DB.products.length>1,has=DB.products.some(p=>p.id===l.pid);
+  const opts=DB.products.map(p=>`<option value="${p.id}"${p.id===l.pid?' selected':''}>${esc(p.name)} · ${rateTxt(p.gst)}%</option>`).join('')+(has?'':`<option value="${l.pid}" selected>${esc(l.pname)} · ${rateTxt(l.gst)}%</option>`);
+  const a=(l.qty!=null&&l.rate!=null)?money(lineAmt(l)):'';
+  return`<div class="row" data-id="${l.id}"><div class="c-n">${i+1}</div>
+  <label class="f f-party"><span class="lab">Party</span><input type="text" data-f="party" autocomplete="off" autocapitalize="words" enterkeyhint="next" placeholder="Party name" value="${esc(l.party)}"></label>
+  <label class="f f-prod"><span class="lab">Product (GST)</span><select data-f="pid"${many?'':' tabindex="-1"'}>${opts}</select></label>
+  <label class="f f-count"><span class="lab">Count</span><input type="number" data-f="count" inputmode="numeric" min="0" step="1" enterkeyhint="next" value="${val(l.count)}"></label>
+  <label class="f f-factor"><span class="lab">Factor</span><input type="number" data-f="factor" inputmode="decimal" step="any" tabindex="-1" value="${val(l.factor)}"></label>
+  <label class="f f-qty"><span class="lab">Qty</span><input type="number" data-f="qty" inputmode="decimal" step="0.01" min="0" enterkeyhint="next" value="${val(l.qty)}"></label>
+  <label class="f f-rate"><span class="lab">Rate</span><input type="number" data-f="rate" inputmode="decimal" step="any" min="0" enterkeyhint="next" value="${val(l.rate)}"></label>
+  <div class="f f-amt"><span class="lab">Amount</span><span class="amt">${a}</span></div>
+  <div class="c-act"><button class="icon" data-act="dup-row" title="Duplicate this entry" aria-label="Duplicate entry">⧉</button><button class="icon dng" data-act="del-row" title="Remove this entry" aria-label="Remove entry">✕</button></div></div>`;
+}
+function renderLines(){$('#lines').innerHTML=cur.lines.map(lineHTML).join('')}
+function renderEditor(){
+  const typeOpts=DB.settings.invoiceTypes.map(t=>t.name);if(!typeOpts.includes(cur.type))typeOpts.unshift(cur.type);
+  viewEl.innerHTML=`
+  <section class="card details">
+    <label class="fld">Invoice type<select id="f-type">${typeOpts.map(t=>`<option${t===cur.type?' selected':''}>${esc(t)}</option>`).join('')}</select></label>
+    <label class="fld">Bill no.<input type="text" id="f-no" value="${esc(cur.no)}"></label>
+    <div class="fld">Date<div class="dateRow"><input type="date" id="f-date" value="${esc(cur.date)}" aria-label="Date"><button class="btn sm" data-act="today" title="Set to today">Today</button></div></div>
+    <label class="fld wide">Remarks (optional, printed on the bill)<input type="text" id="f-remarks" value="${esc(cur.remarks)}" placeholder="e.g. vehicle number, delivery note"></label>
+  </section>
+  <section class="card">
+    <h2>Entries <span class="sp"></span><span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400">Enter moves to the next field · Enter on Rate starts a new entry with the same party</span></h2>
+    <div class="grid">
+      <div class="hdr"><span></span><span>Party</span><span>Product (GST)</span><span class="r">Count</span><span class="r">Factor</span><span class="r">Qty</span><span class="r">Rate</span><span class="r">Amount</span><span></span></div>
+      <div id="lines"></div>
+      <div class="tot"><span></span><span class="t-lbl">Subtotal</span><span class="t-gap"></span><span class="r" id="t-count" data-l="Count"></span><span class="t-gap"></span><span class="r" id="t-qty" data-l="Qty"></span><span class="r" id="t-avg" title="Average rate" data-l="Avg rate"></span><span class="r" id="t-sub" data-l="Subtotal"></span><span></span></div>
+    </div>
+    <div class="addrow"><button class="btn pri" data-act="add-row">+ Add entry</button><span class="hint">Tip: type a few letters of a party. If it is new, pick “+ Add” and it joins your party list right away.</span></div>
+  </section>
+  <details class="card" id="psum"><summary style="cursor:pointer;font-weight:700">Party-wise totals</summary><div class="scroll" id="psumBody" style="margin-top:8px"></div></details>
+  <section class="card"><h2>Additional charges / taxes <span class="sp"></span><button class="btn sm" data-act="reset-charges" title="Reset rates to the defaults from Settings">Reset rates</button></h2><div id="summary"></div></section>`;
+  renderLines();lastSig='';
+  $('#bar').innerHTML=`<div class="bt"><span>Invoice total <i class="status" id="status"></i></span><b id="barTotal">0</b></div>
+   <div class="acts"><button class="btn pri" data-act="save">Save</button><button class="btn" data-act="preview">Preview</button><button class="btn" data-act="print">Print</button><button class="btn" data-act="pdf">PDF</button><button class="btn" data-act="share">Share</button><button class="btn" data-act="new">New</button></div>`;
+  updateTotals();updateStatus();
+}
+function updateStatus(){const s=$('#status');if(!s)return;const dirty=JSON.stringify(cur)!==snap;s.textContent=curSaved?(dirty?'Edited':'Saved'):'Draft';s.className='status'+(curSaved&&!dirty?'':' dirty')}
+let lastSig='';
+function updateTotals(){
+  if(view!=='bill')return;
+  const k=calc(cur);
+  $('#t-count').textContent=cnt(k.count);$('#t-qty').textContent=nf2.format(k.qty);$('#t-avg').textContent=k.qty?money(k.avg):'';$('#t-sub').textContent=money(k.sub);
+  const rows=buildRows(cur,k,false),sig=rows.map(r=>r.kind+r.letter+r.label+(r.ci??'')+r.basis).join('|');
+  const sm=$('#summary');
+  if(sig!==lastSig){lastSig=sig;
+    sm.innerHTML=rows.map((r,i)=>{
+      const unit=r.kind==='charge'?(r.basis==='percent'?'%':(r.basis==='perCount'?'/ count':(r.basis==='perQty'?'/ qty':'flat'))):'';
+      const rate=r.kind==='charge'?`<input type="number" inputmode="decimal" step="any" data-ci="${r.ci}" value="${val(cur.charges[r.ci].rate)}" aria-label="Rate for ${esc(r.label)}"><em>${unit}</em>`:'';
+      return`<div class="srow ${r.kind==='charge'?'':r.kind}" data-i="${i}"><span class="s-l">${r.letter}</span><span class="s-name">${esc(r.label)}</span><span class="s-note">${esc(r.note||'')}</span><span class="s-rate">${rate}</span><span class="s-amt">${money(r.amt)}</span></div>`}).join('');
+  }else{
+    $$('.srow',sm).forEach((el,i)=>{$('.s-note',el).textContent=rows[i].note||'';$('.s-amt',el).textContent=money(rows[i].amt)});
+  }
+  $('#barTotal').textContent='₹ '+nf0.format(k.total);
+  const m=new Map();k.act.forEach(l=>{const o=m.get(l.party||'(no party)')||{c:0,q:0,a:0};o.c+=l.count||0;o.q+=l.qty||0;o.a+=lineAmt(l);m.set(l.party||'(no party)',o)});
+  $('#psumBody').innerHTML=m.size?`<table class="t"><thead><tr><th>Party</th><th class="r">Count</th><th class="r">Qty</th><th class="r">Amount</th></tr></thead><tbody>${[...m].map(([p,o])=>`<tr><td>${esc(p)}</td><td class="r num">${cnt(o.c)}</td><td class="r num">${nf2.format(o.q)}</td><td class="r num">${money(r2(o.a))}</td></tr>`).join('')}</tbody></table>`:'<div class="hint">Totals per party appear once you add entries.</div>';
+}
+function addRow(){const last=cur.lines[cur.lines.length-1];const l=blankLine(last);cur.lines.push(l);renderLines();updateTotals();persist();const row=$(`.row[data-id="${l.id}"]`);focusField(row,'party');row&&row.scrollIntoView({block:'center',behavior:'smooth'})}
+
+/* ---- history ---- */
+function renderHistory(){
+  const q=histQ.trim().toLowerCase();
+  const list=[...DB.invoices].sort((a,b)=>(b.date.localeCompare(a.date))||((b.savedAt||0)-(a.savedAt||0)))
+    .filter(i=>!q||[i.no,i.type,fmtDate(i.date),...i.lines.map(l=>l.party)].join(' ').toLowerCase().includes(q));
+  viewEl.innerHTML=`<section class="card"><h2>Saved bills <span class="sp"></span><span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400">${DB.invoices.length} saved</span></h2>
+  <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap"><input type="search" id="hq" placeholder="Search by number, date or party" value="${esc(histQ)}" style="flex:1;min-width:200px"><button class="btn" data-act="export-all">Export backup</button></div>
+  ${list.length?`<div class="scroll"><table class="t"><thead><tr><th>No.</th><th>Date</th><th>Type</th><th class="r">Entries</th><th class="r">Qty</th><th class="r">Total</th><th></th></tr></thead><tbody>${list.map(i=>{const k=calc(i);return`<tr data-inv="${i.id}"><td><b>${esc(i.no)}</b></td><td>${fmtDate(i.date)}</td><td>${esc(i.type)}</td><td class="r num">${k.act.length}</td><td class="r num">${nf2.format(k.qty)}</td><td class="r num"><b>${nf0.format(k.total)}</b></td><td class="r" style="white-space:nowrap"><button class="btn sm" data-act="open-inv">Open</button> <button class="btn sm" data-act="dup-inv">Duplicate</button> <button class="btn sm dng" data-act="del-inv">Delete</button></td></tr>`}).join('')}</tbody></table></div>`:`<div class="empty">${DB.invoices.length?'No bills match your search.':'No saved bills yet. Prepare a bill and press Save, or load the sample bill from Settings → Data to try the app.'}</div>`}
+  </section>`;
+}
+
+/* ---- settings ---- */
+const SECS=[['business','Business'],['bill','Bill options'],['parties','Parties'],['products','Products & GST'],['charges','Charges & rates'],['data','Data']];
+function renderSettings(){
+  viewEl.innerHTML=`<div class="chips" role="tablist">${SECS.map(([k,n])=>`<button class="chip" data-sec="${k}" aria-current="${k===settingsSec}">${n}</button>`).join('')}</div><div id="sec" class="stack"></div>`;
+  renderSec();
+}
+const setField=(path,label,type='text',extra='')=>{const v=path.split('.').reduce((o,k)=>o[k],DB);return`<label class="fld">${label}<input type="${type}" data-path="${path}" value="${esc(v)}" ${extra}></label>`};
+const setCheck=(path,label)=>{const v=path.split('.').reduce((o,k)=>o[k],DB);return`<label class="check"><input type="checkbox" data-path="${path}"${v?' checked':''}>${label}</label>`};
+function renderSec(){
+  const el=$('#sec');if(!el)return;let h='';
+  if(settingsSec==='business'){
+    h=`<section class="card stack"><h2>Business details (printed on every bill)</h2>
+    ${setField('settings.business.name','Business name')}
+    <label class="fld">Address (use a new line for a second line)<textarea data-path="settings.business.address" rows="2">${esc(DB.settings.business.address)}</textarea></label>
+    <div class="two">${setField('settings.business.phone','Phone (optional)')}${setField('settings.business.gstin','GSTIN (optional)')}</div>
+    ${setField('settings.business.footer','Footer note beside the signature (optional)')}
+    <div class="hint">Changes save automatically.</div></section>`;
+  }else if(settingsSec==='bill'){
+    h=`<section class="card stack"><h2>Invoice types</h2><div class="hint">The first radio button marks the type used for each new bill. You can still switch the type on any bill.</div>
+    ${DB.settings.invoiceTypes.map(t=>`<div class="lrow ty" data-id="${t.id}"><input type="text" data-list="type" data-k="name" value="${esc(t.name)}" aria-label="Invoice type"><label class="check"><input type="radio" name="deftype" data-act="def-type"${t.id===DB.settings.defaultTypeId?' checked':''}>Default</label><button class="icon dng" data-act="del-type" aria-label="Remove type">✕</button></div>`).join('')}
+    <div><button class="btn sm" data-act="add-type">+ Add invoice type</button></div></section>
+    <section class="card stack"><h2>Entries & numbering</h2>
+    <div class="three">${setField('settings.factor','Default factor','number','step="any"')}${setField('settings.prefix','Bill number prefix (e.g. HT/26-27/)')}${setField('settings.nextNo','Next bill number','number','step="1" min="1"')}</div>
+    ${setCheck('settings.titleProducts','Add the product name(s) to the bill title, e.g. “PURCHASE BILL - Soya”')}
+    ${setCheck('settings.partySummary','Print a party-wise summary table at the end of the bill')}
+    <div class="hint">The factor applies to new entries. Each entry can still have its own factor.</div></section>`;
+  }else if(settingsSec==='parties'){
+    h=`<section class="card stack"><h2>Parties <span class="sp"></span><span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400" id="pcount"></span></h2>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><input type="text" id="newParty" placeholder="New party name" style="flex:1;min-width:200px"><button class="btn pri" data-act="add-party">Add party</button></div>
+    <input type="search" id="pq" placeholder="Search parties" value="${esc(partyQ)}"><div id="plist"></div></section>`;
+  }else if(settingsSec==='products'){
+    h=`<section class="card stack"><h2>Products & GST rate</h2><div class="hint">Every entry picks one of these. GST on the bill is worked out per product rate.</div>
+    ${DB.products.map(p=>`<div class="lrow pr" data-id="${p.id}"><input type="text" data-list="product" data-k="name" value="${esc(p.name)}" aria-label="Product name"><label class="fld" style="flex-direction:row;align-items:center;gap:6px"><input type="number" step="any" min="0" data-list="product" data-k="gst" value="${val(p.gst)}" aria-label="GST rate"><span>%</span></label><label class="check"><input type="radio" name="defprod" data-act="def-prod"${p.id===DB.defaultProductId?' checked':''}>Default</label><button class="icon dng" data-act="del-prod" aria-label="Remove product">✕</button></div>`).join('')}
+    <div><button class="btn sm" data-act="add-prod">+ Add product</button></div></section>`;
+  }else if(settingsSec==='charges'){
+    h=Object.keys(GROUPS).map(g=>{
+      const items=DB.charges.filter(c=>c.group===g);
+      const bases=g==='commission'?['percent']:Object.keys(BASIS);
+      return`<section class="card stack"><h2>${GROUPS[g].title}</h2>
+      ${items.map(c=>{const i=DB.charges.indexOf(c);return`<div class="lrow ch" data-id="${c.id}"><input type="text" data-list="charge" data-k="name" value="${esc(c.name)}" aria-label="Charge name">
+      <select data-list="charge" data-k="basis" aria-label="Basis">${bases.map(b=>`<option value="${b}"${b===c.basis?' selected':''}>${g==='commission'?'% of (Total incl. GST + Expenses)':BASIS[b]}</option>`).join('')}</select>
+      <input type="number" step="any" data-list="charge" data-k="rate" value="${val(c.rate)}" aria-label="Rate"><label class="check" title="Do not print this line when its rate is 0"><input type="checkbox" data-list="charge" data-k="hideZero"${c.hideZero?' checked':''}>Hide if 0</label>
+      <button class="icon" data-act="up-ch" aria-label="Move up">↑</button><button class="icon" data-act="down-ch" aria-label="Move down">↓</button><button class="icon dng" data-act="del-ch" aria-label="Remove charge">✕</button></div>`}).join('')||'<div class="hint">Nothing here yet.</div>'}
+      <div><button class="btn sm" data-act="add-ch" data-g="${g}">+ Add</button></div></section>`}).join('')+`<div class="hint">These are the default rates for new bills. On a bill you can still change any rate for that bill only.</div>`;
+  }else{
+    h=`<section class="card stack"><h2>Backup & data</h2><div class="hint">Everything is stored in this browser on this device. Export a backup regularly and keep it somewhere safe. To move to another device, export here and import there.</div>
+    <div class="chips"><button class="btn" data-act="export-all">Export backup (JSON)</button><label class="btn" style="cursor:pointer">Import backup<input type="file" id="importFile" accept=".json,application/json" hidden></label></div></section>
+    <section class="card stack"><h2>Try it out</h2><div class="hint">Loads the bill from your Excel file (28 entries, Soya, 5% GST) into the editor so you can check the result against the sheet. Expected invoice total: 15,88,445.</div><div><button class="btn" data-act="load-sample">Load sample bill</button></div></section>
+    <section class="card stack"><h2>Reset</h2><div class="hint">Removes all saved bills, parties, products and settings from this browser.</div><div><button class="btn dng" data-act="erase">Erase everything</button></div></section>`;
+  }
+  el.innerHTML=h;
+  if(settingsSec==='parties')renderParties();
+}
+function renderParties(){
+  const q=partyQ.trim().toLowerCase();
+  const list=[...DB.parties].sort((a,b)=>a.name.localeCompare(b.name)).filter(p=>!q||p.name.toLowerCase().includes(q));
+  $('#pcount').textContent=DB.parties.length+' parties';
+  $('#plist').innerHTML=list.length?list.map(p=>`<div class="lrow p" data-id="${p.id}"><input type="text" data-list="party" data-k="name" value="${esc(p.name)}" aria-label="Party name"><input type="text" data-list="party" data-k="phone" value="${esc(p.phone)}" placeholder="Phone (optional)" aria-label="Phone"><input type="text" data-list="party" data-k="gstin" value="${esc(p.gstin)}" placeholder="GSTIN (optional)" aria-label="GSTIN"><button class="icon dng" data-act="del-party" aria-label="Remove party">✕</button></div>`).join(''):'<div class="empty">No parties found.</div>';
+}
+
+/* ============================== actions ============================== */
+function setCur(inv,saved){cur=inv;curSaved=saved;snap=saved?JSON.stringify(inv):null;persistNow();go('bill')}
+function saveBill(){
+  if(!guard())return false;
+  const no=String(cur.no).trim();cur.no=no;
+  if(DB.invoices.some(i=>i.id!==cur.id&&String(i.no).trim().toLowerCase()===no.toLowerCase())){toast(`Bill no. ${no} is already used by another saved bill.`,true);$('#f-no').classList.add('bad');$('#f-no').focus();return false}
+  cur.savedAt=Date.now();
+  const i=DB.invoices.findIndex(x=>x.id===cur.id);
+  if(i>=0)DB.invoices[i]=clone(cur);else{DB.invoices.push(clone(cur));
+    if(no===DB.settings.prefix+DB.settings.nextNo)DB.settings.nextNo++;}
+  curSaved=true;snap=JSON.stringify(cur);persistNow();updateStatus();toast(`Saved bill no. ${no}`);return true;
+}
+function newBill(){cur=newInvoice();curSaved=false;snap=null;persistNow();go('bill');setTimeout(()=>focusField($('.row'),'party'),50)}
+function doPrint(){if(!guard())return;$('#printRoot').innerHTML=sheetHTML(cur);setTimeout(()=>window.print(),50)}
+window.addEventListener('beforeprint',()=>{$('#printRoot').innerHTML=sheetHTML(cur)});
+function getPdf(){
+  if(!pdfSafe(cur)){toast('Some names use non-English letters. Opening the print dialog: choose “Save as PDF”.',true);doPrint();return null}
+  return buildPdf(cur);
+}
+function doPdf(){if(!guard())return;const b=getPdf();if(b){download(b,fileBase(cur)+'.pdf');toast('PDF downloaded')}}
+function openPreview(){
+  if(!guard())return;
+  openModal(`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h3>Preview</h3><div class="chips"><button class="btn sm" data-act="print">Print</button><button class="btn sm" data-act="pdf">PDF</button><button class="btn sm" data-act="share">Share</button><button class="btn sm pri" data-act="close">Close</button></div></div><div class="paperwrap" id="pw"><div class="paper" id="paper">${sheetHTML(cur)}</div></div>`,true);
+  fitPaper();
+}
+function fitPaper(){const pw=$('#pw'),p=$('#paper');if(!pw||!p)return;const s=Math.min(1,(pw.clientWidth-24)/p.offsetWidth);p.style.transform=`scale(${s})`;pw.style.height=(p.offsetHeight*s+24)+'px'}
+window.addEventListener('resize',fitPaper);
+function openShare(){
+  if(!guard())return;
+  const t=encodeURIComponent(summaryText(cur));const can=!!navigator.canShare;
+  openModal(`<h3>Share bill no. ${esc(cur.no)}</h3><div class="opt">
+   <button class="btn" data-act="share-pdf">${can?'Share PDF…':'Download PDF'}<small>${can?'Pick WhatsApp, Email or any app on this device':'Saves the PDF so you can attach it anywhere'}</small></button>
+   <a class="btn" href="https://wa.me/?text=${t}" target="_blank" rel="noopener">WhatsApp message<small>Sends the bill summary as text</small></a>
+   <a class="btn" href="mailto:?subject=${encodeURIComponent(billTitle(cur)+' - '+cur.no)}&body=${t}">Email<small>Opens your mail app with the summary</small></a>
+   <button class="btn" data-act="copy-text">Copy summary<small>Copies the text to paste anywhere</small></button>
+   <button class="btn" data-act="csv">Download CSV for Excel<small>All entries and charges</small></button></div>
+   <div class="mfoot"><button class="btn" data-act="close">Close</button></div>`);
+}
+async function sharePdf(){
+  const b=getPdf();if(!b)return;const f=new File([b],fileBase(cur)+'.pdf',{type:'application/pdf'});
+  try{if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:billTitle(cur),text:summaryText(cur).replace(/\*/g,'')});closeModal();return}}catch(e){if(e&&e.name==='AbortError')return}
+  download(b,f.name);toast('PDF downloaded. Attach it in your app.');
+}
+async function copyText(txt){try{await navigator.clipboard.writeText(txt);toast('Summary copied')}catch(e){const ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');toast('Summary copied')}catch(_){toast('Could not copy',true)}ta.remove()}}
+function loadSample(){
+  let prod=DB.products.find(p=>/soya/i.test(p.name));if(!prod){prod={id:uid(),name:'Soya',gst:5};DB.products.push(prod)}
+  const inv=newInvoice();inv.date='2026-10-03';
+  inv.lines=SAMPLE_LINES.map(([n,c,q,r])=>{const p=addParty(n);return{id:uid(),party:p.name,pid:prod.id,pname:prod.name,gst:prod.gst,count:c,factor:49,qty:q,rate:r}});
+  setCur(inv,false);toast('Sample bill loaded');
+}
+
+/* ============================== events ============================== */
+document.addEventListener('click',async e=>{
+  const nav=e.target.closest('[data-nav]');if(nav){go(nav.dataset.nav);return}
+  const sec=e.target.closest('[data-sec]');if(sec){settingsSec=sec.dataset.sec;renderSettings();return}
+  if(e.target.id==='modal'){closeModal();return}
+  if(dd.contains(e.target)){const d=e.target.closest('[data-i]');if(d&&ddS)commitParty(ddS.items[+d.dataset.i],true);return}
+  const b=e.target.closest('[data-act]');if(!b)return;
+  const act=b.dataset.act,row=b.closest('.row'),lrow=b.closest('.lrow');
+  const lid=row&&row.dataset.id,rid=lrow&&lrow.dataset.id;
+  switch(act){
+    case 'add-row':addRow();break;
+    case 'today':cur.date=todayISO();$('#f-date').value=cur.date;persist();break;
+    case 'del-row':{if(cur.lines.length===1){cur.lines=[blankLine()]}else cur.lines=cur.lines.filter(l=>l.id!==lid);renderLines();updateTotals();persist();break}
+    case 'dup-row':{const i=cur.lines.findIndex(l=>l.id===lid);const c={...cur.lines[i],id:uid()};cur.lines.splice(i+1,0,c);renderLines();updateTotals();persist();focusField($(`.row[data-id="${c.id}"]`),'count');break}
+    case 'reset-charges':cur.charges=DB.charges.map(c=>({...c}));lastSig='';updateTotals();persist();toast('Rates reset to defaults');break;
+    case 'save':saveBill();break;
+    case 'preview':openPreview();break;
+    case 'print':closeModal();doPrint();break;
+    case 'pdf':doPdf();break;
+    case 'share':openShare();break;
+    case 'share-pdf':sharePdf();break;
+    case 'copy-text':copyText(summaryText(cur));break;
+    case 'csv':download(new Blob([csvOf(cur)],{type:'text/csv'}),fileBase(cur)+'.csv');break;
+    case 'close':closeModal();break;
+    case 'new':{if(hasWork()&&!await ask('Start a new bill? The current bill has changes that are not saved.','Discard and start new'))break;newBill();break}
+    /* history */
+    case 'open-inv':{const inv=DB.invoices.find(i=>i.id===b.closest('tr').dataset.inv);if(hasWork()&&!await ask('Open this bill? The bill you are editing has unsaved changes.','Discard and open'))break;setCur(clone(inv),true);break}
+    case 'dup-inv':{const src=DB.invoices.find(i=>i.id===b.closest('tr').dataset.inv);if(hasWork()&&!await ask('Duplicate into the editor? The bill you are editing has unsaved changes.','Discard and duplicate'))break;
+      const inv=clone(src);inv.id=uid();inv.no=DB.settings.prefix+DB.settings.nextNo;inv.date=todayISO();delete inv.savedAt;inv.lines.forEach(l=>l.id=uid());setCur(inv,false);toast('Duplicated. Review and save.');break}
+    case 'del-inv':{const id=b.closest('tr').dataset.inv;const inv=DB.invoices.find(i=>i.id===id);if(await ask(`Delete bill no. ${inv.no}? This cannot be undone.`,'Delete')){DB.invoices=DB.invoices.filter(i=>i.id!==id);if(cur.id===id){curSaved=false;snap=null}persistNow();renderHistory();toast('Bill deleted')}break}
+    case 'export-all':download(new Blob([JSON.stringify(DB,null,1)],{type:'application/json'}),'quick-bill-backup-'+todayISO()+'.json');toast('Backup downloaded');break;
+    /* settings */
+    case 'add-type':{DB.settings.invoiceTypes.push({id:uid(),name:'NEW BILL'});writeDB();renderSec();break}
+    case 'del-type':{if(DB.settings.invoiceTypes.length<2){toast('Keep at least one invoice type.',true);break}DB.settings.invoiceTypes=DB.settings.invoiceTypes.filter(t=>t.id!==rid);if(DB.settings.defaultTypeId===rid)DB.settings.defaultTypeId=DB.settings.invoiceTypes[0].id;writeDB();renderSec();break}
+    case 'def-type':DB.settings.defaultTypeId=rid;writeDB();break;
+    case 'add-party':{const i=$('#newParty');if(!i.value.trim())break;if(partyObj(i.value)){toast('That party already exists.',true);break}addParty(i.value);i.value='';renderParties();i.focus();break}
+    case 'del-party':{const p=DB.parties.find(x=>x.id===rid);if(await ask(`Remove “${p.name}” from the party list? Saved bills keep their names.`,'Remove')){DB.parties=DB.parties.filter(x=>x.id!==rid);writeDB();renderParties()}break}
+    case 'add-prod':{DB.products.push({id:uid(),name:'New product',gst:5});writeDB();renderSec();break}
+    case 'del-prod':{if(DB.products.length<2){toast('Keep at least one product.',true);break}const p=DB.products.find(x=>x.id===rid);if(await ask(`Remove product “${p.name}”?`,'Remove')){DB.products=DB.products.filter(x=>x.id!==rid);if(DB.defaultProductId===rid)DB.defaultProductId=DB.products[0].id;writeDB();renderSec()}break}
+    case 'def-prod':DB.defaultProductId=rid;writeDB();break;
+    case 'add-ch':DB.charges.push({id:uid(),name:'New charge',basis:b.dataset.g==='commission'?'percent':'perCount',rate:0,group:b.dataset.g,hideZero:false});writeDB();renderSec();break;
+    case 'del-ch':{const c=DB.charges.find(x=>x.id===rid);if(await ask(`Remove “${c.name}”?`,'Remove')){DB.charges=DB.charges.filter(x=>x.id!==rid);writeDB();renderSec()}break}
+    case 'up-ch':case 'down-ch':{const i=DB.charges.findIndex(x=>x.id===rid),g=DB.charges[i].group,dir=act==='up-ch'?-1:1;let j=i+dir;while(j>=0&&j<DB.charges.length&&DB.charges[j].group!==g)j+=dir;
+      if(j>=0&&j<DB.charges.length){[DB.charges[i],DB.charges[j]]=[DB.charges[j],DB.charges[i]];writeDB();renderSec()}break}
+    case 'load-sample':{if(hasWork()&&!await ask('Load the sample bill? The bill you are editing has unsaved changes.','Discard and load'))break;loadSample();break}
+    case 'erase':{if(await ask('Erase ALL data from this browser? Export a backup first if unsure.','Erase everything')){try{localStorage.removeItem(KEY)}catch(_){}DB=seed();cur=newInvoice();curSaved=false;snap=null;persistNow();$('#brandName').textContent=DB.settings.business.name;go('bill');toast('All data erased')}break}
+  }
+});
+
+document.addEventListener('input',e=>{
+  const t=e.target;
+  if(t.classList.contains('bad'))t.classList.remove('bad');
+  /* bill fields */
+  if(t.id==='f-no'){cur.no=t.value;persist();return}
+  if(t.id==='f-date'){cur.date=t.value;persist();return}
+  if(t.id==='f-remarks'){cur.remarks=t.value;persist();return}
+  if(t.id==='hq'){histQ=t.value;const pos=t.selectionStart;renderHistory();const n=$('#hq');n.focus();n.setSelectionRange(pos,pos);return}
+  if(t.id==='pq'){partyQ=t.value;renderParties();return}
+  const f=t.dataset&&t.dataset.f;
+  if(f){
+    const row=t.closest('.row'),l=cur.lines.find(x=>x.id===row.dataset.id);if(!l)return;
+    if(f==='party'){if(ddS&&ddS.input===t){ddS.typed=true;ddS.idx=-1;ddRender()}return}
+    if(f==='pid')return;
+    l[f]=numOrNull(t.value);
+    const a=$('.amt',row);a.textContent=(l.qty!=null&&l.rate!=null)?money(lineAmt(l)):'';
+    updateTotals();persist();return;
+  }
+  if(t.dataset&&t.dataset.ci!=null){const c=cur.charges[+t.dataset.ci];c.rate=numOrNull(t.value);updateTotals();persist();return}
+  /* settings */
+  if(t.dataset&&t.dataset.path){
+    const parts=t.dataset.path.split('.');const last=parts.pop();const o=parts.reduce((o,k)=>o[k],DB);
+    o[last]=t.type==='checkbox'?t.checked:(t.type==='number'?(parseFloat(t.value)||0):t.value);
+    writeDB();if(t.dataset.path==='settings.business.name')$('#brandName').textContent=t.value;return;
+  }
+  if(t.dataset&&t.dataset.list){
+    const lr=t.closest('.lrow');if(!lr)return;const id=lr.dataset.id,k=t.dataset.k;
+    const arr={party:DB.parties,product:DB.products,charge:DB.charges,type:DB.settings.invoiceTypes}[t.dataset.list];const o=arr.find(x=>x.id===id);if(!o)return;
+    o[k]=t.type==='checkbox'?t.checked:(t.type==='number'?numOrNull(t.value):t.value);
+    if(t.dataset.list==='product'&&k==='gst'&&o.gst==null)o.gst=0;
+    writeDB();
+  }
+});
+document.addEventListener('change',e=>{
+  const t=e.target,f=t.dataset&&t.dataset.f;
+  if(t.id==='f-type'){cur.type=t.value;persist();return}
+  if(t.id==='importFile'){const file=t.files[0];if(!file)return;const rd=new FileReader();rd.onload=async()=>{try{const d=JSON.parse(rd.result);if(!d.settings||!d.parties||!d.products||!d.charges)throw 0;
+      if(await ask('Replace everything in this browser with the backup?','Import')){DB=d;DB.invoices=DB.invoices||[];cur=DB.draft&&DB.draft.inv?DB.draft.inv:newInvoice();curSaved=!!(DB.draft&&DB.draft.saved);snap=DB.draft&&DB.draft.snap||null;writeDB();$('#brandName').textContent=DB.settings.business.name;go('bill');toast('Backup imported')}}catch(_){toast('That file is not a Quick Bill backup.',true)}};rd.readAsText(file);return}
+  if(f){
+    const row=t.closest('.row'),l=cur.lines.find(x=>x.id===row.dataset.id);if(!l)return;
+    if(f==='pid'){const p=DB.products.find(x=>x.id===t.value);if(p){l.pid=p.id;l.pname=p.name;l.gst=p.gst}updateTotals();persist();return}
+    if(f==='qty'&&l.qty!=null){l.qty=Math.round(l.qty*100)/100;t.value=l.qty;updateTotals()}
+    return;
+  }
+  const d=t.dataset;
+  if(d&&d.list==='charge'&&d.k==='basis'){renderSec()}
+  if(d&&d.list==='party'&&d.k==='name'){const o=DB.parties.find(x=>x.id===t.closest('.lrow').dataset.id);const nm=t.value.trim();
+    if(!nm||DB.parties.some(x=>x!==o&&x.name.toLowerCase()===nm.toLowerCase())){toast(!nm?'Party name cannot be empty.':'Another party already has that name.',true);t.value=o.name;return}o.name=nm;writeDB();renderParties()}
+  if(d&&d.list==='product'&&d.k==='name'&&!t.value.trim()){const o=DB.products.find(x=>x.id===t.closest('.lrow').dataset.id);t.value=o.name='Product';writeDB()}
+  if(d&&d.list==='type'&&d.k==='name'&&!t.value.trim()){const o=DB.settings.invoiceTypes.find(x=>x.id===t.closest('.lrow').dataset.id);t.value=o.name='INVOICE';writeDB()}
+  if(t.id==='newParty')return;
+});
+document.addEventListener('focusin',e=>{
+  const t=e.target;
+  if(t.dataset&&t.dataset.f==='party'){if(!ddS||ddS.input!==t){ddOpen(t);t.select()}}
+  else if(ddS&&!dd.contains(t))ddClose();
+  if(t.matches&&t.matches('input[type=number]'))t.select();
+});
+document.addEventListener('focusout',e=>{
+  const t=e.target;
+  if(ddS&&ddS.input===t){
+    if(ddS.typed){const it=ddS.idx>=0?ddS.items[ddS.idx]:null;const typedTxt=t.value.trim();
+      if(typedTxt)commitParty(it,false);else{const row=t.closest('.row'),l=cur.lines.find(x=>x.id===row.dataset.id);if(l)l.party='';ddClose();persist()}}
+    else ddClose();
+  }
+});
+document.addEventListener('wheel',e=>{if(document.activeElement&&document.activeElement.type==='number')document.activeElement.blur()},{passive:true});
+document.addEventListener('scroll',e=>{if(ddS&&e.target!==dd)ddRender()},true);
+dd.addEventListener('mousedown',e=>e.preventDefault());
+window.addEventListener('resize',()=>{if(ddS)ddRender()});
+document.addEventListener('keydown',e=>{
+  const t=e.target;
+  if(e.key==='Escape'){if(ddS){const row=t.closest('.row');const l=row&&cur.lines.find(x=>x.id===row.dataset.id);if(l)t.value=l.party;ddClose();return}if(!$('#modal').hidden)closeModal();return}
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'&&view==='bill'){e.preventDefault();saveBill();return}
+  if(t.id==='newParty'&&e.key==='Enter'){e.preventDefault();$('[data-act="add-party"]').click();return}
+  const f=t.dataset&&t.dataset.f;if(!f)return;
+  const row=t.closest('.row');
+  if(f==='party'&&ddS&&ddS.input===t){
+    if(e.key==='ArrowDown'){e.preventDefault();ddS.idx=Math.min(ddS.items.length-1,ddS.idx+1);ddRender();return}
+    if(e.key==='ArrowUp'){e.preventDefault();ddS.idx=Math.max(0,ddS.idx-1);ddRender();return}
+    if(e.key==='Enter'){e.preventDefault();const it=ddS.idx>=0?ddS.items[ddS.idx]:null;
+      if(ddS.typed&&!it&&!t.value.trim()){return}commitParty(it,true);return}
+    if(e.key==='Tab'){return}
+  }
+  if(e.key==='Enter'){
+    e.preventDefault();
+    const order=['party','count','qty','rate'];let i=order.indexOf(f);
+    if(f==='pid')i=0;if(f==='factor')i=1;
+    if(i<order.length-1)focusField(row,order[i+1]);
+    else{const nxt=row.nextElementSibling;if(nxt)focusField(nxt,'party');else addRow()}
+  }
+});
+
+/* ============================== start ============================== */
+$('#brandName').textContent=DB.settings.business.name;
+go('bill');
+})();
+</script>
+</body>
+</html>
