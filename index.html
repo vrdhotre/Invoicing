@@ -46,6 +46,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 
 input.bad,select.bad{border-color:var(--danger);background:var(--danger-soft)}
 input[type=number]{-moz-appearance:textfield;text-align:right}
 input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+input[readonly]{cursor:default;background:color-mix(in srgb,var(--field) 82%,var(--line));}
+input[readonly]:focus{border-color:var(--line);box-shadow:none}
 .fld{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:600;min-width:0}
 .fld input,.fld select{color:var(--ink);font-weight:400;font-size:14px}
 .btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:8px 14px;font-weight:600;min-height:38px;white-space:nowrap}
@@ -242,8 +244,8 @@ const debounce=(f,ms)=>{let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>f(
 const rateTxt=n=>String(+(+n).toFixed(4));
 
 /* ============================== data ============================== */
-const SAMPLE_PARTIES=['Mohan Traders','Santoshkumar Gadgi','Maheshwari T.','Mahadev T. Co.','Vijaykumar Biradar','Vithal Trading Co.','Nagshetty Vaijnath','Sharnappa Kaplapur','Jai Jagadamba T.','Basawraj Malegaon','Guru Govindraj Swamy','S. D. Bellur','A. P. Sultanguru','Narsappa Allapur'];
-const SAMPLE_LINES=[['Mohan Traders',25,7,5725],['Santoshkumar Gadgi',6,11,5550],['Maheshwari T.',8,14,5681],['Mahadev T. Co.',16,8,5711],['Vijaykumar Biradar',36,4,5725],['Vithal Trading Co.',27,3,5750],['Vithal Trading Co.',15,8,5660],['Vithal Trading Co.',66,12,5945],['Vithal Trading Co.',40,11,5711],['Nagshetty Vaijnath',23,12,5925],['Nagshetty Vaijnath',24,3,5505],['Sharnappa Kaplapur',40,13,5981],['Sharnappa Kaplapur',11,5,5901],['Sharnappa Kaplapur',20,13,5850],['Sharnappa Kaplapur',13,10,5750],['Jai Jagadamba T.',11,7,5850],['Jai Jagadamba T.',16,12,5875],['Santoshkumar Gadgi',7,8,5721],['Basawraj Malegaon',6,8,5821],['Guru Govindraj Swamy',32,7,5705],['S. D. Bellur',16,5,5921],['S. D. Bellur',14,10,5875],['S. D. Bellur',6,6,5750],['S. D. Bellur',10,9,5851],['A. P. Sultanguru',50,11,5750],['A. P. Sultanguru',40,8,5880],['A. P. Sultanguru',14,14,5865],['Narsappa Allapur',27,10,5891]];
+const SAMPLE_PARTIES=['Mohan Traders','Santoshkumar Gadgi','Maheshwari T.','Mahadev T. Co.','Vijaykumar Biradar','Vithal Trading Co.','Nagshetty Vaijnath','Sharnappa Kaplapur','Jai Jagadamba T.','Basawraj Malegaon','Guru Govindraj Swamy','S. D. Bellur','A. P. Sultanpur','Narsappa Allapur'];
+const SAMPLE_LINES=[['Mohan Traders',25,7,5725],['Santoshkumar Gadgi',6,11,5550],['Maheshwari T.',8,14,5681],['Mahadev T. Co.',16,8,5711],['Vijaykumar Biradar',36,4,5725],['Vithal Trading Co.',27,3,5750],['Vithal Trading Co.',15,8,5660],['Vithal Trading Co.',66,12,5945],['Vithal Trading Co.',40,11,5711],['Nagshetty Vaijnath',23,12,5925],['Nagshetty Vaijnath',24,3,5505],['Sharnappa Kaplapur',40,13,5981],['Sharnappa Kaplapur',11,5,5901],['Sharnappa Kaplapur',20,13,5850],['Sharnappa Kaplapur',13,10,5750],['Jai Jagadamba T.',11,7,5850],['Jai Jagadamba T.',16,12,5875],['Santoshkumar Gadgi',7,8,5721],['Basawraj Malegaon',6,8,5821],['Guru Govindraj Swamy',32,7,5705],['S. D. Bellur',16,5,5921],['S. D. Bellur',14,10,5875],['S. D. Bellur',6,6,5750],['S. D. Bellur',10,9,5851],['A. P. Sultanpur',50,11,5750],['A. P. Sultanpur',40,8,5880],['A. P. Sultanpur',14,14,5865],['Narsappa Allapur',27,10,5891]];
 const BASIS={percent:'% of subtotal',perCount:'per count',perQty:'per qty',flat:'flat amount'};
 const GROUPS={taxable:{title:'Charges added before GST (GST is also charged on these)',short:'Before GST'},expense:{title:'Expenses after GST (per count, not taxed)',short:'Expenses'},commission:{title:'Commission (% of Total incl. GST + Expenses)',short:'Commission'}};
 
@@ -327,6 +329,7 @@ function calc(inv){
 }
 function chargeInfo(c,k){
   const r=rateTxt(c.rate||0);
+  if(c.group==='commission')return{note:'Based on Total (Including GST) + Expense TOTAL',rate:r+'%'};
   if(c.basis==='percent')return{note:'',rate:r+'%'};
   if(c.basis==='perCount')return{note:`${r} x ${cnt(k.count)}`,rate:r};
   if(c.basis==='perQty')return{note:`${r} x ${nf2.format(k.qty)}`,rate:r};
@@ -349,8 +352,6 @@ function buildRows(inv,k,forSheet){
   if(k.expense.length){
     k.expense.forEach(addCharge);
     kl=letter();rows.push({kind:'sub',letter:kl,label:'Expense TOTAL',amt:k.K});
-    rows.push({kind:'ref',letter:letter(),label:'Total (Including GST)',note:'Row '+gl,amt:k.G});
-    rows.push({kind:'ref',letter:letter(),label:'Expense TOTAL',note:'Row '+kl,amt:k.K});
   }
   k.comm.forEach(addCharge);
   rows.push({kind:'round',letter:letter(),label:'Round Off',amt:k.round});
@@ -589,8 +590,8 @@ function lineHTML(l,i){
   <label class="f f-party"><span class="lab">Party</span><input type="text" data-f="party" autocomplete="off" autocapitalize="words" enterkeyhint="next" placeholder="Party name" value="${esc(l.party)}"></label>
   <label class="f f-prod"><span class="lab">Product (GST)</span><select data-f="pid"${many?'':' tabindex="-1"'}>${opts}</select></label>
   <label class="f f-count"><span class="lab">Count</span><input type="number" data-f="count" inputmode="numeric" min="0" step="1" enterkeyhint="next" value="${val(l.count)}"></label>
-  <label class="f f-factor"><span class="lab">Factor</span><input type="number" data-f="factor" inputmode="decimal" step="any" tabindex="-1" value="${val(l.factor)}"></label>
-  <label class="f f-qty"><span class="lab">Qty</span><input type="number" data-f="qty" inputmode="decimal" step="0.01" min="0" enterkeyhint="next" value="${val(l.qty)}"></label>
+  <label class="f f-factor"><span class="lab">Factor</span><input type="number" data-f="factor" inputmode="decimal" step="any" tabindex="-1" value="${val(l.factor)}" readonly aria-readonly="true" title="Factor is controlled from Settings → Bill options"></label>
+  <label class="f f-qty"><span class="lab">Qty</span><input type="number" data-f="qty" inputmode="decimal" step="0.01" min="0" tabindex="-1" value="${val(l.qty)}" readonly aria-readonly="true" title="Qty is calculated automatically from Count × Factor"></label>
   <label class="f f-rate"><span class="lab">Rate</span><input type="number" data-f="rate" inputmode="decimal" step="any" min="0" enterkeyhint="next" value="${val(l.rate)}"></label>
   <div class="f f-amt"><span class="lab">Amount</span><span class="amt">${a}</span></div>
   <div class="c-act"><button class="icon" data-act="dup-row" title="Duplicate this entry" aria-label="Duplicate entry">⧉</button><button class="icon dng" data-act="del-row" title="Remove this entry" aria-label="Remove entry">✕</button></div></div>`;
@@ -679,7 +680,7 @@ function renderSec(){
     <div class="three">${setField('settings.factor','Default factor','number','step="any"')}${setField('settings.prefix','Bill number prefix (e.g. HT/26-27/)')}${setField('settings.nextNo','Next bill number','number','step="1" min="1"')}</div>
     ${setCheck('settings.titleProducts','Add the product name(s) to the bill title, e.g. “PURCHASE BILL - Soya”')}
     ${setCheck('settings.partySummary','Print a party-wise summary table at the end of the bill')}
-    <div class="hint">The factor applies to new entries. Each entry can still have its own factor.</div></section>`;
+    <div class="hint">Factor is controlled here in Settings and is not editable while making an invoice. Qty is calculated automatically from Count × Factor.</div></section>`;
   }else if(settingsSec==='parties'){
     h=`<section class="card stack"><h2>Parties <span class="sp"></span><span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400" id="pcount"></span></h2>
     <div style="display:flex;gap:8px;flex-wrap:wrap"><input type="text" id="newParty" placeholder="New party name" style="flex:1;min-width:200px"><button class="btn pri" data-act="add-party">Add party</button></div>
@@ -921,8 +922,8 @@ document.addEventListener('keydown',e=>{
   }
   if(e.key==='Enter'){
     e.preventDefault();
-    const order=['party','count','qty','rate'];let i=order.indexOf(f);
-    if(f==='pid')i=0;if(f==='factor')i=1;
+    const order=['party','count','rate'];let i=order.indexOf(f);
+    if(f==='pid')i=0;
     if(i<order.length-1)focusField(row,order[i+1]);
     else{const nxt=row.nextElementSibling;if(nxt)focusField(nxt,'party');else addRow()}
   }
