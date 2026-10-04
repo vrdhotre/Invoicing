@@ -251,13 +251,15 @@ const GROUPS={taxable:{title:'Charges added before GST (GST is also charged on t
 
 function seed(){
   const prod={id:uid(),name:'Soya',gst:5};
+  const other={id:uid(),name:'Other',gst:0};
   const ch=(name,basis,rate,group)=>({id:uid(),name,basis,rate,group,hideZero:false});
   const ty={id:uid(),name:'PURCHASE BILL'};
   return{
+    schemaVersion:2,
     settings:{business:{name:'HIBARE TRADERS',address:'APMC Yard, Bidar 585403',phone:'',gstin:'',footer:''},
       invoiceTypes:[ty],defaultTypeId:ty.id,titleProducts:true,factor:49,prefix:'',nextNo:1,partySummary:false},
     parties:SAMPLE_PARTIES.map(n=>({id:uid(),name:n,phone:'',gstin:'',used:0})),
-    products:[prod],defaultProductId:prod.id,
+    products:[prod,other],defaultProductId:prod.id,
     charges:[ch('Adat Commission','percent',2,'taxable'),ch('Market Fees','percent',0.6,'taxable'),ch('Batta','percent',0.5,'taxable'),ch('Dhadvai','perCount',0.75,'taxable'),
              ch('Silvai and Sutali','perCount',5,'expense'),ch('Loading','perCount',8,'expense'),ch('Bardan','perCount',0,'expense'),
              ch('Commission','percent',1,'commission')],
@@ -267,6 +269,15 @@ let storageOK=true;
 function readDB(){try{const t=localStorage.getItem(KEY);return t?JSON.parse(t):null}catch(e){storageOK=false;return null}}
 function writeDB(){try{localStorage.setItem(KEY,JSON.stringify(DB));}catch(e){storageOK=false;$('#banner').hidden=false}}
 let DB=readDB()||seed();
+function migrateDB(db){
+  if((db.schemaVersion||0)<2){
+    if(!db.products.some(p=>String(p.name||'').trim().toLowerCase()==='other'))db.products.push({id:uid(),name:'Other',gst:0});
+    db.schemaVersion=2;
+    return true;
+  }
+  return false;
+}
+if(migrateDB(DB))writeDB();
 if(!storageOK)$('#banner').hidden=false;
 
 /* current invoice state */
@@ -873,7 +884,7 @@ document.addEventListener('change',e=>{
   const t=e.target,f=t.dataset&&t.dataset.f;
   if(t.id==='f-type'){cur.type=t.value;persist();return}
   if(t.id==='importFile'){const file=t.files[0];if(!file)return;const rd=new FileReader();rd.onload=async()=>{try{const d=JSON.parse(rd.result);if(!d.settings||!d.parties||!d.products||!d.charges)throw 0;
-      if(await ask('Replace everything in this browser with the backup?','Import')){DB=d;DB.invoices=DB.invoices||[];cur=DB.draft&&DB.draft.inv?DB.draft.inv:newInvoice();curSaved=!!(DB.draft&&DB.draft.saved);snap=DB.draft&&DB.draft.snap||null;writeDB();$('#brandName').textContent=DB.settings.business.name;go('bill');toast('Backup imported')}}catch(_){toast('That file is not a Quick Bill backup.',true)}};rd.readAsText(file);return}
+      if(await ask('Replace everything in this browser with the backup?','Import')){DB=d;DB.invoices=DB.invoices||[];migrateDB(DB);cur=DB.draft&&DB.draft.inv?DB.draft.inv:newInvoice();curSaved=!!(DB.draft&&DB.draft.saved);snap=DB.draft&&DB.draft.snap||null;writeDB();$('#brandName').textContent=DB.settings.business.name;go('bill');toast('Backup imported')}}catch(_){toast('That file is not a Quick Bill backup.',true)}};rd.readAsText(file);return}
   if(f){
     const row=t.closest('.row'),l=cur.lines.find(x=>x.id===row.dataset.id);if(!l)return;
     if(f==='pid'){const p=DB.products.find(x=>x.id===t.value);if(p){l.pid=p.id;l.pname=p.name;l.gst=p.gst}updateTotals();persist();return}
