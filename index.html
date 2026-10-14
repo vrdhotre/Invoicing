@@ -121,6 +121,29 @@ input[readonly]:focus{border-color:var(--line);box-shadow:none}
 .srow.total .s-note,.srow.total .s-l{color:inherit;opacity:.85}
 @media (max-width:860px){.srow{grid-template-columns:26px 1fr 120px;grid-template-areas:"l n a" "l t r"}.srow .s-l{grid-area:l}.srow .s-name{grid-area:n}.srow .s-note{grid-area:t}.srow .s-rate{grid-area:r}.srow .s-amt{grid-area:a}}
 
+/* party-wise totals with a toggle per party */
+.ptools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.phd,.psm,.pall{display:grid;grid-template-columns:minmax(150px,2fr) repeat(6,minmax(84px,1fr));gap:6px;align-items:center}
+.phd{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:0 4px 6px;border-bottom:1px solid var(--line)}
+.phd .r,.psm .r,.pall .r{text-align:right;font-variant-numeric:tabular-nums}
+.pdet{border-bottom:1px solid var(--line)}
+.psm{padding:9px 4px;cursor:pointer;list-style:none;font-weight:600;border-radius:8px}
+.psm::-webkit-details-marker{display:none}
+.psm:hover{background:color-mix(in srgb,var(--accent-soft) 45%,transparent)}
+.psm .pn{display:flex;align-items:center;gap:6px;min-width:0}
+.psm .pn::before{content:"▸";flex:none;color:var(--muted);transition:transform .15s}
+.pdet[open]>.psm .pn::before{transform:rotate(90deg)}
+.psm .pn b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pbody{padding:4px 4px 14px 22px}
+.pall{padding:10px 4px 2px;border-top:2px solid var(--ink);margin-top:2px;font-weight:700}
+@media (max-width:860px){
+  .phd{display:none}
+  .psm,.pall{grid-template-columns:1fr 1fr 1fr}
+  .psm .pn,.pall .pn{grid-column:1/-1}
+  .psm .r::before,.pall .r::before{content:attr(data-l);display:block;font-size:10px;color:var(--muted);font-weight:600}
+  .pbody{padding-left:4px}
+}
+
 /* bottom bar */
 .bar{position:fixed;left:0;right:0;bottom:0;z-index:30;background:var(--surface);border-top:1px solid var(--line);box-shadow:0 -6px 20px rgba(0,0,0,.08);padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:center}
 .bar .bt{margin-right:auto;display:flex;flex-direction:column;line-height:1.1}
@@ -257,7 +280,7 @@ function seed(){
   return{
     schemaVersion:2,
     settings:{business:{name:'HIBARE TRADERS',address:'APMC Yard, Bidar 585403',phone:'',gstin:'',footer:''},
-      invoiceTypes:[ty],defaultTypeId:ty.id,titleProducts:true,factor:49,prefix:'',nextNo:1,partySummary:false},
+      invoiceTypes:[ty],defaultTypeId:ty.id,titleProducts:true,factor:49,prefix:'',nextNo:1,partySummary:false,partyBreakup:false},
     parties:SAMPLE_PARTIES.map(n=>({id:uid(),name:n,phone:'',gstin:'',used:0})),
     products:[prod,other],defaultProductId:prod.id,
     charges:[ch('Adat Commission','percent',2,'taxable'),ch('Market Fees','percent',0.6,'taxable'),ch('Batta','percent',0.5,'taxable'),ch('Dhadvai','perCount',0.75,'taxable'),
@@ -282,6 +305,7 @@ if(!storageOK)$('#banner').hidden=false;
 
 /* current invoice state */
 let cur=null,curSaved=false,snap=null,view='bill',settingsSec='business',histQ='',partyQ='';
+const openParty=new Set(); /* parties whose toggle is open in the party-wise totals */
 function blankLine(prev){
   const p=prev?DB.products.find(x=>x.id===prev.pid):null;
   const prod=p||DB.products.find(x=>x.id===DB.defaultProductId)||DB.products[0];
@@ -346,7 +370,8 @@ function chargeInfo(c,k){
   if(c.basis==='perQty')return{note:`${r} x ${nf2.format(k.qty)}`,rate:r};
   return{note:'Flat',rate:r};
 }
-/* rows of the "additional charges" block, shared by the screen panel, the printed sheet and the PDF */
+/* rows of the "additional charges" block, shared by the screen panel, the printed sheet and the PDF.
+   It works on the invoice totals and, in exactly the same way, on one party's share (see partyCalc). */
 function buildRows(inv,k,forSheet){
   let L=0;const rows=[];
   const letter=()=>{let n=L++,s='';do{s=String.fromCharCode(65+n%26)+s;n=Math.floor(n/26)-1}while(n>=0);return s};
@@ -369,6 +394,68 @@ function buildRows(inv,k,forSheet){
   rows.push({kind:'total',letter:letter(),label:'INVOICE TOTAL',amt:k.total,final:true});
   return rows;
 }
+
+/* ---- party-wise share of every charge and of GST ----
+   allocate() splits an already-rounded invoice amount across the parties in proportion to a weight, working in
+   whole paise with the largest-remainder method. The parts therefore always add up to the invoice amount exactly. */
+function allocate(total,weights){
+  const n=weights.length,out=new Array(n).fill(0);
+  if(!n)return out;
+  const T=Math.round(total*100);if(!T)return out;
+  const sg=T<0?-1:1,A=Math.abs(T),w=weights.map(x=>Math.max(0,+x||0));
+  const W=w.reduce((a,x)=>a+x,0);
+  if(W<=0){out[0]=T/100;return out}
+  const base=[],frac=[];let used=0;
+  w.forEach((x,i)=>{const v=A*x/W;const f=Math.floor(v+1e-9);base[i]=f;frac.push([v-f,i]);used+=f});
+  let left=A-used;
+  frac.sort((a,b)=>b[0]-a[0]||a[1]-b[1]);
+  for(let j=0;left>0&&j<frac.length;j++,left--)base[frac[j][1]]++;
+  while(left<0){let mi=0;base.forEach((x,i)=>{if(x>base[mi])mi=i});base[mi]--;left++}
+  return base.map(x=>sg*x/100);
+}
+/* One object per party, shaped like calc()'s result, so buildRows() can lay out a party's ledger too:
+   goods, each "before GST" charge (Adat Commission, Market Fees, Batta, Dhadvai ...), Total Excluding GST (Without GST),
+   GST per rate, Total Including GST (With GST), expenses, commission, round off and the party total. */
+function partyCalc(inv,k){
+  const P=[],mp=new Map();
+  k.act.forEach(l=>{
+    const nm=l.party||'(no party)';let p=mp.get(nm);
+    if(!p){p={name:nm,count:0,qty:0,sub:0,rates:{}};mp.set(nm,p);P.push(p)}
+    p.count+=l.count||0;p.qty+=l.qty||0;
+    const a=lineAmt(l);p.sub+=a;if(a){const g=+l.gst||0;p.rates[g]=(p.rates[g]||0)+a}
+  });
+  P.forEach(p=>{p.count=r2(p.count);p.qty=r2(p.qty);p.sub=r2(p.sub);p.avg=p.qty?p.sub/p.qty:0});
+  const wOf=(c,p)=>c.basis==='perCount'?p.count:(c.basis==='perQty'?p.qty:p.sub);
+  /* charges added before GST */
+  const tax=k.taxable.map(x=>allocate(x.amt,P.map(p=>wOf(x.c,p))));
+  P.forEach((p,i)=>{
+    p.taxable=k.taxable.map((x,j)=>({c:x.c,ci:x.ci,amt:tax[j][i]}));
+    p.E=r2(p.sub+p.taxable.reduce((a,x)=>a+x.amt,0));
+  });
+  /* GST: each party's taxable base per rate = its goods at that rate + its pro-rata share of its own taxable charges */
+  const pbase=P.map(p=>{const tx=p.E-p.sub;return k.gst.map(g=>{const gd=r2(p.rates[g.rate]||0);return p.sub?gd+tx*gd/p.sub:0})});
+  const ga=k.gst.map((g,j)=>allocate(g.amt,P.map((p,i)=>pbase[i][j])));
+  P.forEach((p,i)=>{
+    const rows=[];
+    k.gst.forEach((g,j)=>{const goods=r2(p.rates[g.rate]||0);if(goods||pbase[i][j]||ga[j][i])rows.push({rate:g.rate,goods,base:r2(pbase[i][j]),amt:ga[j][i]})});
+    if(!rows.length)rows.push({rate:0,goods:0,base:0,amt:0});
+    const diff=r2(p.E-rows.reduce((a,x)=>a+x.base,0));
+    if(diff)rows[rows.length-1].base=r2(rows[rows.length-1].base+diff);
+    p.gst=rows;p.F=r2(rows.reduce((a,x)=>a+x.amt,0));p.G=r2(p.E+p.F);
+  });
+  /* expenses after GST */
+  const ex=k.expense.map(x=>allocate(x.amt,P.map(p=>wOf(x.c,p))));
+  P.forEach((p,i)=>{p.expense=k.expense.map((x,j)=>({c:x.c,ci:x.ci,amt:ex[j][i]}));p.K=r2(p.expense.reduce((a,x)=>a+x.amt,0))});
+  /* commission follows (Total incl. GST + Expenses) of each party */
+  const cm=k.comm.map(x=>allocate(x.amt,P.map(p=>p.G+p.K)));
+  P.forEach((p,i)=>{p.comm=k.comm.map((x,j)=>({c:x.c,ci:x.ci,amt:cm[j][i]}));p.N=r2(p.comm.reduce((a,x)=>a+x.amt,0));p.pre=r2(p.G+p.K+p.N)});
+  /* round off is shared too, so the party totals add up to the invoice total */
+  const rd=allocate(k.round,P.map(p=>p.pre));
+  P.forEach((p,i)=>{p.round=rd[i];p.total=r2(p.pre+p.round)});
+  return P;
+}
+const partyRows=(inv,p,forSheet)=>buildRows(inv,p,forSheet).map(r=>r.kind==='total'?{...r,label:'PARTY TOTAL'}:r);
+
 function billTitle(inv){
   const names=[...new Set(calc(inv).act.map(l=>l.pname).filter(Boolean))];
   return inv.type+(DB.settings.titleProducts&&names.length?' - '+names.join(', '):'');
@@ -394,8 +481,11 @@ function sheetHTML(inv){
   const crow=rows.map(r=>`<tr class="${r.kind==='sub'||r.kind==='total'?r.kind:''}"><td class="c">${r.letter}</td><td colspan="2">${esc(r.label)}</td><td>${esc(r.note||'')}</td><td class="n">${r.kind==='charge'?esc(r.rate):''}</td><td class="n">${money(r.amt)}</td></tr>`).join('');
   let psum='';
   if(DB.settings.partySummary){
-    const m=new Map();k.act.forEach(l=>{const o=m.get(l.party)||{c:0,q:0,a:0};o.c+=l.count||0;o.q+=l.qty||0;o.a+=lineAmt(l);m.set(l.party,o)});
-    psum=`<div class="keep"><div style="font-weight:700;margin:4px 0">Party-wise summary</div><table><thead><tr><th>Party</th><th>Count</th><th>Qty</th><th>Amount</th></tr></thead><tbody>${[...m].map(([p,o])=>`<tr><td>${esc(p)}</td><td class="n">${cnt(o.c)}</td><td class="n">${nf2.format(o.q)}</td><td class="n">${money(r2(o.a))}</td></tr>`).join('')}</tbody></table></div>`;
+    const P=partyCalc(inv,k);
+    psum=`<div class="keep"><div style="font-weight:700;margin:4px 0">Party-wise summary</div><table><thead><tr><th>Party</th><th>Count</th><th>Qty</th><th>Goods</th><th>Without GST</th><th>With GST</th><th>Total</th></tr></thead><tbody>${P.map(p=>`<tr><td>${esc(p.name)}</td><td class="n">${cnt(p.count)}</td><td class="n">${nf2.format(p.qty)}</td><td class="n">${money(p.sub)}</td><td class="n">${money(p.E)}</td><td class="n">${money(p.G)}</td><td class="n">${money(p.total)}</td></tr>`).join('')}</tbody><tfoot><tr class="sub"><td>All parties</td><td class="n">${cnt(k.count)}</td><td class="n">${nf2.format(k.qty)}</td><td class="n">${money(k.sub)}</td><td class="n">${money(k.E)}</td><td class="n">${money(k.G)}</td><td class="n">${money(k.total)}</td></tr></tfoot></table></div>`;
+    if(DB.settings.partyBreakup){
+      psum+=P.map(p=>`<div class="keep"><div style="font-weight:700;margin:4px 0">Charges &amp; GST: ${esc(p.name)}</div><table><thead><tr><th style="width:36px">Sr.</th><th>Particulars</th><th>Basis</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${partyRows(inv,p,true).map(r=>`<tr class="${r.kind==='sub'||r.kind==='total'?r.kind:''}"><td class="c">${r.letter}</td><td>${esc(r.label)}</td><td>${esc(r.note||'')}</td><td class="n">${r.kind==='charge'?esc(r.rate):''}</td><td class="n">${money(r.amt)}</td></tr>`).join('')}</tbody></table></div>`).join('');
+    }
   }
   return`<div class="sheet">
   <h1>${esc(B.name)}</h1><div class="addr">${esc(B.address).replace(/\n/g,'<br>')}</div>${sub?`<div class="addr">${esc(sub)}</div>`:''}
@@ -470,19 +560,32 @@ function buildPdf(inv){
   const cw=[26,W-26-150-80-90,150,80,90];
   const crow=(cells,o={})=>{let x=M;cw.forEach((w,i)=>{p.rect(x,y,w,RH,o.fill);const t=cells[i]==null?'':String(cells[i]);
       if(t){const a=i>=3?'r':(i===0?'c':'l');const s=p.fit(t,w-8,o.bold,o.size||9);if(a==='r')p.txt(x+w-4,y+10.5,s,{bold:o.bold,align:'r',size:o.size});else if(a==='c')p.txt(x+w/2,y+10.5,s,{bold:o.bold,align:'c',size:o.size});else p.txt(x+4,y+10.5,s,{bold:o.bold,size:o.size})}x+=w});y+=RH};
+  const chargeLine=r=>crow([r.letter,r.label,r.note||'',r.kind==='charge'?r.rate:'',money(r.amt)],{bold:r.kind==='sub'||r.kind==='total',fill:r.kind==='total'?0.86:(r.kind==='sub'?0.94:null),size:r.kind==='total'?10.5:9});
   crow(['','ADDITIONAL CHARGES / TAXES','','Basis / Rate','Amount'],{fill:0.9,bold:true});
-  rows.forEach(r=>crow([r.letter,r.label,r.note||'',r.kind==='charge'?r.rate:'',money(r.amt)],{bold:r.kind==='sub'||r.kind==='total',fill:r.kind==='total'?0.86:(r.kind==='sub'?0.94:null),size:r.kind==='total'?10.5:9}));
+  rows.forEach(chargeLine);
   y+=16;
   const words=inWords(k.total);const wl=[];let ln='';words.split(' ').forEach(w=>{if(tw(ln+' '+w,true,9.5)>W){wl.push(ln);ln=w}else ln=ln?ln+' '+w:w});wl.push(ln);
   need(wl.length*13+(inv.remarks?16:0)+90);
   wl.forEach(s=>{p.txt(M,y,s,{bold:true,size:9.5});y+=13});
   if(inv.remarks){y+=3;p.txt(M,y,'Remarks: '+p.fit(inv.remarks,W-60,false,9),{size:9});y+=14}
   if(DB.settings.partySummary){
-    const m=new Map();k.act.forEach(l=>{const o=m.get(l.party)||{c:0,q:0,a:0};o.c+=l.count||0;o.q+=l.qty||0;o.a+=lineAmt(l);m.set(l.party,o)});
+    const P=partyCalc(inv,k);
     y+=6;need(RH*3);p.txt(M,y+8,'Party-wise summary',{bold:true,size:9.5});y+=14;
-    const pc=[W-60-70-90,60,70,90];const prow=(c,o={})=>{let x=M;pc.forEach((w,i)=>{p.rect(x,y,w,RH,o.fill);const t=String(c[i]);if(i===0)p.txt(x+4,y+10.5,p.fit(t,w-8,o.bold,9),{bold:o.bold});else p.txt(x+w-4,y+10.5,t,{bold:o.bold,align:'r'});x+=w});y+=RH};
-    prow(['Party','Count','Qty','Amount'],{fill:0.9,bold:true});
-    [...m].forEach(([n,o])=>{if(y+RH>BOT){p.add();y=M;prow(['Party','Count','Qty','Amount'],{fill:0.9,bold:true})}prow([n,cnt(o.c),nf2.format(o.q),money(r2(o.a))])});
+    const pc=[W-40-52-66-72-72-72,40,52,66,72,72,72];
+    const prow=(c,o={})=>{let x=M;pc.forEach((w,i)=>{p.rect(x,y,w,RH,o.fill);const t=String(c[i]);if(i===0)p.txt(x+4,y+10.5,p.fit(t,w-8,o.bold,9),{bold:o.bold});else p.txt(x+w-4,y+10.5,p.fit(t,w-8,o.bold,9),{bold:o.bold,align:'r'});x+=w});y+=RH};
+    const ph=['Party','Count','Qty','Goods','Without GST','With GST','Total'];
+    prow(ph,{fill:0.9,bold:true});
+    P.forEach(q=>{if(y+RH>BOT){p.add();y=M;prow(ph,{fill:0.9,bold:true})}prow([q.name,cnt(q.count),nf2.format(q.qty),money(q.sub),money(q.E),money(q.G),money(q.total)])});
+    if(y+RH>BOT){p.add();y=M;prow(ph,{fill:0.9,bold:true})}
+    prow(['All parties',cnt(k.count),nf2.format(k.qty),money(k.sub),money(k.E),money(k.G),money(k.total)],{fill:0.94,bold:true});
+    if(DB.settings.partyBreakup){
+      P.forEach(q=>{
+        const rr=partyRows(inv,q,true);
+        y+=10;need((rr.length+1)*RH+10);
+        crow(['','Charges & GST: '+q.name,'','Basis / Rate','Amount'],{fill:0.9,bold:true});
+        rr.forEach(chargeLine);
+      });
+    }
   }
   y+=30;if(y+70>BOT){p.add();y=M+10}
   if(B.footer)p.txt(M,y+40,p.fit(B.footer,W/2,false,8.5),{size:8.5});
@@ -499,7 +602,12 @@ function csvOf(inv){
   k.act.forEach((l,i)=>out.push([i+1,l.party,l.pname,l.count??'',l.count!=null?l.factor:'',l.qty??'',l.rate??'',lineAmt(l)]));
   out.push(['','Subtotal','',k.count,'',k.qty,r2(k.avg),k.sub],[]);
   buildRows(inv,k,true).forEach(r=>out.push([r.letter,r.label,r.note||'','','','',r.kind==='charge'?r.rate:'',r.amt]));
-  return '﻿'+out.map(r=>r.map(q).join(',')).join('\r\n');
+  const P=partyCalc(inv,k);
+  out.push([],['Party-wise summary'],['Party','Count','Qty','Goods','Without GST','With GST','Party total']);
+  P.forEach(x=>out.push([x.name,x.count,x.qty,x.sub,x.E,x.G,x.total]));
+  out.push(['All parties',k.count,k.qty,k.sub,k.E,k.G,k.total]);
+  P.forEach(x=>{out.push([],['Charges & GST: '+x.name]);partyRows(inv,x,true).forEach(r=>out.push([r.letter,r.label,r.note||'','','','',r.kind==='charge'?r.rate:'',r.amt]))});
+  return '\uFEFF'+out.map(r=>r.map(q).join(',')).join('\r\n');
 }
 function summaryText(inv){
   const k=calc(inv),B=DB.settings.business;
@@ -626,7 +734,7 @@ function renderEditor(){
     </div>
     <div class="addrow"><button class="btn pri" data-act="add-row">+ Add entry</button><span class="hint">Tip: type a few letters of a party. If it is new, pick “+ Add” and it joins your party list right away.</span></div>
   </section>
-  <details class="card" id="psum"><summary style="cursor:pointer;font-weight:700">Party-wise totals</summary><div class="scroll" id="psumBody" style="margin-top:8px"></div></details>
+  <details class="card" id="psum"><summary style="cursor:pointer;font-weight:700">Party-wise totals, charges &amp; GST</summary><div id="psumBody" style="margin-top:8px"></div></details>
   <section class="card"><h2>Additional charges / taxes <span class="sp"></span><button class="btn sm" data-act="reset-charges" title="Reset rates to the defaults from Settings">Reset rates</button></h2><div id="summary"></div></section>`;
   renderLines();lastSig='';
   $('#bar').innerHTML=`<div class="bt"><span>Invoice total <i class="status" id="status"></i></span><b id="barTotal">0</b></div>
@@ -635,6 +743,21 @@ function renderEditor(){
 }
 function updateStatus(){const s=$('#status');if(!s)return;const dirty=JSON.stringify(cur)!==snap;s.textContent=curSaved?(dirty?'Edited':'Saved'):'Draft';s.className='status'+(curSaved&&!dirty?'':' dirty')}
 let lastSig='';
+
+/* party-wise totals: one toggle per party, each opening that party's own ledger (charges, Without GST, GST, With GST ...) */
+function partyRowHTML(r){
+  const unit=r.kind==='charge'?(r.rate+(r.basis==='perCount'?' / count':(r.basis==='perQty'?' / qty':''))):'';
+  return`<div class="srow ${r.kind==='charge'?'':r.kind}"><span class="s-l">${r.letter}</span><span class="s-name">${esc(r.label)}</span><span class="s-note">${esc(r.note||'')}</span><span class="s-rate"><em>${esc(unit)}</em></span><span class="s-amt">${money(r.amt)}</span></div>`;
+}
+function partySummaryHTML(inv,k){
+  const P=partyCalc(inv,k);
+  if(!P.length)return'<div class="hint">Totals per party appear once you add entries.</div>';
+  const c=(l,v)=>`<span class="r" data-l="${l}">${v}</span>`;
+  const items=P.map(p=>`<details class="pdet" data-party="${esc(p.name)}"${openParty.has(p.name)?' open':''}><summary class="psm"><span class="pn"><b>${esc(p.name)}</b></span>${c('Count',cnt(p.count))}${c('Qty',nf2.format(p.qty))}${c('Goods',money(p.sub))}${c('Without GST',money(p.E))}${c('With GST',money(p.G))}${c('Party total',money(p.total))}</summary><div class="pbody">${partyRows(inv,p,false).map(partyRowHTML).join('')}</div></details>`).join('');
+  return`<div class="ptools"><button class="btn sm" data-act="pt-open">Expand all</button><button class="btn sm" data-act="pt-close">Collapse all</button><span class="hint">Tap a party to see its share of the charges and GST. Without GST = goods + charges added before GST; With GST = that plus GST.</span></div>
+  <div class="pgrid"><div class="phd"><span>Party</span><span class="r">Count</span><span class="r">Qty</span><span class="r">Goods</span><span class="r">Without GST</span><span class="r">With GST</span><span class="r">Party total</span></div>${items}
+  <div class="pall"><span class="pn">All parties</span>${c('Count',cnt(k.count))}${c('Qty',nf2.format(k.qty))}${c('Goods',money(k.sub))}${c('Without GST',money(k.E))}${c('With GST',money(k.G))}${c('Invoice total',nf0.format(k.total))}</div></div>`;
+}
 function updateTotals(){
   if(view!=='bill')return;
   const k=calc(cur);
@@ -650,8 +773,7 @@ function updateTotals(){
     $$('.srow',sm).forEach((el,i)=>{$('.s-note',el).textContent=rows[i].note||'';$('.s-amt',el).textContent=money(rows[i].amt)});
   }
   $('#barTotal').textContent='₹ '+nf0.format(k.total);
-  const m=new Map();k.act.forEach(l=>{const o=m.get(l.party||'(no party)')||{c:0,q:0,a:0};o.c+=l.count||0;o.q+=l.qty||0;o.a+=lineAmt(l);m.set(l.party||'(no party)',o)});
-  $('#psumBody').innerHTML=m.size?`<table class="t"><thead><tr><th>Party</th><th class="r">Count</th><th class="r">Qty</th><th class="r">Amount</th></tr></thead><tbody>${[...m].map(([p,o])=>`<tr><td>${esc(p)}</td><td class="r num">${cnt(o.c)}</td><td class="r num">${nf2.format(o.q)}</td><td class="r num">${money(r2(o.a))}</td></tr>`).join('')}</tbody></table>`:'<div class="hint">Totals per party appear once you add entries.</div>';
+  $('#psumBody').innerHTML=partySummaryHTML(cur,k);
 }
 function addRow(){const last=cur.lines[cur.lines.length-1];const l=blankLine(last);cur.lines.push(l);renderLines();updateTotals();persist();const row=$(`.row[data-id="${l.id}"]`);focusField(row,'party');row&&row.scrollIntoView({block:'center',behavior:'smooth'})}
 
@@ -690,8 +812,9 @@ function renderSec(){
     <section class="card stack"><h2>Entries & numbering</h2>
     <div class="three">${setField('settings.factor','Default factor','number','step="any"')}${setField('settings.prefix','Bill number prefix (e.g. HT/26-27/)')}${setField('settings.nextNo','Next bill number','number','step="1" min="1"')}</div>
     ${setCheck('settings.titleProducts','Add the product name(s) to the bill title, e.g. “PURCHASE BILL - Soya”')}
-    ${setCheck('settings.partySummary','Print a party-wise summary table at the end of the bill')}
-    <div class="hint">Factor is controlled here in Settings and is not editable while making an invoice. Qty is calculated automatically from Count × Factor.</div></section>`;
+    ${setCheck('settings.partySummary','Print a party-wise summary table at the end of the bill (Goods, Without GST, With GST, Total)')}
+    ${setCheck('settings.partyBreakup','Also print each party’s charges and GST breakup below that summary (needs the option above)')}
+    <div class="hint">Factor is controlled here in Settings and is not editable while making an invoice. Qty is calculated automatically from Count × Factor. On screen, every party in “Party-wise totals” has its own toggle showing its share of the charges and GST.</div></section>`;
   }else if(settingsSec==='parties'){
     h=`<section class="card stack"><h2>Parties <span class="sp"></span><span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400" id="pcount"></span></h2>
     <div style="display:flex;gap:8px;flex-wrap:wrap"><input type="text" id="newParty" placeholder="New party name" style="flex:1;min-width:200px"><button class="btn pri" data-act="add-party">Add party</button></div>
@@ -761,7 +884,7 @@ function openShare(){
    <a class="btn" href="https://wa.me/?text=${t}" target="_blank" rel="noopener">WhatsApp message<small>Sends the bill summary as text</small></a>
    <a class="btn" href="mailto:?subject=${encodeURIComponent(billTitle(cur)+' - '+cur.no)}&body=${t}">Email<small>Opens your mail app with the summary</small></a>
    <button class="btn" data-act="copy-text">Copy summary<small>Copies the text to paste anywhere</small></button>
-   <button class="btn" data-act="csv">Download CSV for Excel<small>All entries and charges</small></button></div>
+   <button class="btn" data-act="csv">Download CSV for Excel<small>All entries, charges and party-wise breakup</small></button></div>
    <div class="mfoot"><button class="btn" data-act="close">Close</button></div>`);
 }
 async function sharePdf(){
@@ -792,6 +915,8 @@ document.addEventListener('click',async e=>{
     case 'del-row':{if(cur.lines.length===1){cur.lines=[blankLine()]}else cur.lines=cur.lines.filter(l=>l.id!==lid);renderLines();updateTotals();persist();break}
     case 'dup-row':{const i=cur.lines.findIndex(l=>l.id===lid);const c={...cur.lines[i],id:uid()};cur.lines.splice(i+1,0,c);renderLines();updateTotals();persist();focusField($(`.row[data-id="${c.id}"]`),'count');break}
     case 'reset-charges':cur.charges=DB.charges.map(c=>({...c}));lastSig='';updateTotals();persist();toast('Rates reset to defaults');break;
+    case 'pt-open':partyCalc(cur,calc(cur)).forEach(p=>openParty.add(p.name));updateTotals();break;
+    case 'pt-close':openParty.clear();updateTotals();break;
     case 'save':saveBill();break;
     case 'preview':openPreview();break;
     case 'print':closeModal();doPrint();break;
@@ -826,6 +951,12 @@ document.addEventListener('click',async e=>{
   }
 });
 
+/* remember which party toggles are open, because the totals are redrawn on every keystroke */
+document.addEventListener('toggle',e=>{
+  const d=e.target;
+  if(d&&d.classList&&d.classList.contains('pdet')){const n=d.dataset.party;if(d.open)openParty.add(n);else openParty.delete(n)}
+},true);
+
 document.addEventListener('input',e=>{
   const t=e.target;
   if(t.classList.contains('bad'))t.classList.remove('bad');
@@ -841,27 +972,14 @@ document.addEventListener('input',e=>{
     if(f==='party'){if(ddS&&ddS.input===t){ddS.typed=true;ddS.idx=-1;ddRender()}return}
     if(f==='pid')return;
     l[f]=numOrNull(t.value);
-    if(f){
-        const row=t.closest('.row'),l=cur.lines.find(x=>x.id===row.dataset.id);if(!l)return;
-        if(f==='party'){if(ddS&&ddS.input===t){ddS.typed=true;ddS.idx=-1;ddRender()}return}
-        if(f==='pid')return;
-        
-        l[f]=numOrNull(t.value);
-
-        // --- NEW AUTO-CALCULATION LOGIC ---
-        if (f === 'count' || f === 'factor') {
-            if (l.count != null && l.factor != null) {
-                // Calculates and rounds to 2 decimal places
-                l.qty = Math.round((l.count * l.factor / 100) * 100) / 100; 
-                const qtyInput = row.querySelector('[data-f="qty"]');
-                if (qtyInput) qtyInput.value = l.qty;
-            }
-        }
-        // ----------------------------------
-
-        const a=$('.amt',row);a.textContent=(l.qty!=null&&l.rate!=null)?money(lineAmt(l)):'';
-        updateTotals();persist();return;
+    /* Qty is calculated automatically from Count x Factor / 100 */
+    if(f==='count'||f==='factor'){
+      if(l.count!=null&&l.factor!=null){
+        l.qty=Math.round((l.count*l.factor/100)*100)/100;
+        const qtyInput=row.querySelector('[data-f="qty"]');
+        if(qtyInput)qtyInput.value=l.qty;
       }
+    }
     const a=$('.amt',row);a.textContent=(l.qty!=null&&l.rate!=null)?money(lineAmt(l)):'';
     updateTotals();persist();return;
   }
