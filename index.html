@@ -123,7 +123,7 @@ input[readonly]:focus{border-color:var(--line);box-shadow:none}
 
 /* party-wise totals with a toggle per party */
 .ptools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
-.phd,.psm,.pall{display:grid;grid-template-columns:minmax(150px,2fr) repeat(6,minmax(84px,1fr));gap:6px;align-items:center}
+.phd,.psm,.pall{display:grid;grid-template-columns:minmax(150px,2fr) repeat(7,minmax(80px,1fr));gap:6px;align-items:center}
 .phd{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:0 4px 6px;border-bottom:1px solid var(--line)}
 .phd .r,.psm .r,.pall .r{text-align:right;font-variant-numeric:tabular-nums}
 .pdet{border-bottom:1px solid var(--line)}
@@ -138,7 +138,7 @@ input[readonly]:focus{border-color:var(--line);box-shadow:none}
 .pall{padding:10px 4px 2px;border-top:2px solid var(--ink);margin-top:2px;font-weight:700}
 @media (max-width:860px){
   .phd{display:none}
-  .psm,.pall{grid-template-columns:1fr 1fr 1fr}
+  .psm,.pall{grid-template-columns:1fr 1fr 1fr 1fr}
   .psm .pn,.pall .pn{grid-column:1/-1}
   .psm .r::before,.pall .r::before{content:attr(data-l);display:block;font-size:10px;color:var(--muted);font-weight:600}
   .pbody{padding-left:4px}
@@ -265,6 +265,8 @@ const numOrNull=v=>{if(v===''||v==null)return null;const n=parseFloat(v);return 
 const val=v=>v==null?'':v;
 const debounce=(f,ms)=>{let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>f(...a),ms)}};
 const rateTxt=n=>String(+(+n).toFixed(4));
+/* weighted average rate = total goods amount / total qty (blank when there is no qty) */
+const avgTxt=o=>o.qty?money(o.sub/o.qty):'';
 
 /* ============================== data ============================== */
 const SAMPLE_PARTIES=['Mohan Traders','Santoshkumar Gadgi','Maheshwari T.','Mahadev T. Co.','Vijaykumar Biradar','Vithal Trading Co.','Nagshetty Vaijnath','Sharnappa Kaplapur','Jai Jagadamba T.','Basawraj Malegaon','Guru Govindraj Swamy','S. D. Bellur','A. P. Sultanpur','Narsappa Allapur'];
@@ -415,7 +417,8 @@ function allocate(total,weights){
 }
 /* One object per party, shaped like calc()'s result, so buildRows() can lay out a party's ledger too:
    goods, each "before GST" charge (Adat Commission, Market Fees, Batta, Dhadvai ...), Total Excluding GST (Without GST),
-   GST per rate, Total Including GST (With GST), expenses, commission, round off and the party total. */
+   GST per rate, Total Including GST (With GST), expenses, commission, round off and the party total.
+   p.avg is the party's weighted average rate = goods amount / total qty. */
 function partyCalc(inv,k){
   const P=[],mp=new Map();
   k.act.forEach(l=>{
@@ -482,7 +485,7 @@ function sheetHTML(inv){
   let psum='';
   if(DB.settings.partySummary){
     const P=partyCalc(inv,k);
-    psum=`<div class="keep"><div style="font-weight:700;margin:4px 0">Party-wise summary</div><table><thead><tr><th>Party</th><th>Count</th><th>Qty</th><th>Goods</th><th>Without GST</th><th>With GST</th><th>Total</th></tr></thead><tbody>${P.map(p=>`<tr><td>${esc(p.name)}</td><td class="n">${cnt(p.count)}</td><td class="n">${nf2.format(p.qty)}</td><td class="n">${money(p.sub)}</td><td class="n">${money(p.E)}</td><td class="n">${money(p.G)}</td><td class="n">${money(p.total)}</td></tr>`).join('')}</tbody><tfoot><tr class="sub"><td>All parties</td><td class="n">${cnt(k.count)}</td><td class="n">${nf2.format(k.qty)}</td><td class="n">${money(k.sub)}</td><td class="n">${money(k.E)}</td><td class="n">${money(k.G)}</td><td class="n">${money(k.total)}</td></tr></tfoot></table></div>`;
+    psum=`<div class="keep"><div style="font-weight:700;margin:4px 0">Party-wise summary</div><table><thead><tr><th>Party</th><th>Count</th><th>Qty</th><th>Avg Rate</th><th>Goods</th><th>Without GST</th><th>With GST</th><th>Total</th></tr></thead><tbody>${P.map(p=>`<tr><td>${esc(p.name)}</td><td class="n">${cnt(p.count)}</td><td class="n">${nf2.format(p.qty)}</td><td class="n">${avgTxt(p)}</td><td class="n">${money(p.sub)}</td><td class="n">${money(p.E)}</td><td class="n">${money(p.G)}</td><td class="n">${money(p.total)}</td></tr>`).join('')}</tbody><tfoot><tr class="sub"><td>All parties</td><td class="n">${cnt(k.count)}</td><td class="n">${nf2.format(k.qty)}</td><td class="n">${avgTxt(k)}</td><td class="n">${money(k.sub)}</td><td class="n">${money(k.E)}</td><td class="n">${money(k.G)}</td><td class="n">${money(k.total)}</td></tr></tfoot></table></div>`;
     if(DB.settings.partyBreakup){
       psum+=P.map(p=>`<div class="keep"><div style="font-weight:700;margin:4px 0">Charges &amp; GST: ${esc(p.name)}</div><table><thead><tr><th style="width:36px">Sr.</th><th>Particulars</th><th>Basis</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${partyRows(inv,p,true).map(r=>`<tr class="${r.kind==='sub'||r.kind==='total'?r.kind:''}"><td class="c">${r.letter}</td><td>${esc(r.label)}</td><td>${esc(r.note||'')}</td><td class="n">${r.kind==='charge'?esc(r.rate):''}</td><td class="n">${money(r.amt)}</td></tr>`).join('')}</tbody></table></div>`).join('');
     }
@@ -571,13 +574,14 @@ function buildPdf(inv){
   if(DB.settings.partySummary){
     const P=partyCalc(inv,k);
     y+=6;need(RH*3);p.txt(M,y+8,'Party-wise summary',{bold:true,size:9.5});y+=14;
-    const pc=[W-40-52-66-72-72-72,40,52,66,72,72,72];
+    /* Party | Count | Qty | Avg Rate | Goods | Without GST | With GST | Total */
+    const pc=[W-40-52-58-66-72-72-72,40,52,58,66,72,72,72];
     const prow=(c,o={})=>{let x=M;pc.forEach((w,i)=>{p.rect(x,y,w,RH,o.fill);const t=String(c[i]);if(i===0)p.txt(x+4,y+10.5,p.fit(t,w-8,o.bold,9),{bold:o.bold});else p.txt(x+w-4,y+10.5,p.fit(t,w-8,o.bold,9),{bold:o.bold,align:'r'});x+=w});y+=RH};
-    const ph=['Party','Count','Qty','Goods','Without GST','With GST','Total'];
+    const ph=['Party','Count','Qty','Avg Rate','Goods','Without GST','With GST','Total'];
     prow(ph,{fill:0.9,bold:true});
-    P.forEach(q=>{if(y+RH>BOT){p.add();y=M;prow(ph,{fill:0.9,bold:true})}prow([q.name,cnt(q.count),nf2.format(q.qty),money(q.sub),money(q.E),money(q.G),money(q.total)])});
+    P.forEach(q=>{if(y+RH>BOT){p.add();y=M;prow(ph,{fill:0.9,bold:true})}prow([q.name,cnt(q.count),nf2.format(q.qty),avgTxt(q),money(q.sub),money(q.E),money(q.G),money(q.total)])});
     if(y+RH>BOT){p.add();y=M;prow(ph,{fill:0.9,bold:true})}
-    prow(['All parties',cnt(k.count),nf2.format(k.qty),money(k.sub),money(k.E),money(k.G),money(k.total)],{fill:0.94,bold:true});
+    prow(['All parties',cnt(k.count),nf2.format(k.qty),avgTxt(k),money(k.sub),money(k.E),money(k.G),money(k.total)],{fill:0.94,bold:true});
     if(DB.settings.partyBreakup){
       P.forEach(q=>{
         const rr=partyRows(inv,q,true);
@@ -603,9 +607,9 @@ function csvOf(inv){
   out.push(['','Subtotal','',k.count,'',k.qty,r2(k.avg),k.sub],[]);
   buildRows(inv,k,true).forEach(r=>out.push([r.letter,r.label,r.note||'','','','',r.kind==='charge'?r.rate:'',r.amt]));
   const P=partyCalc(inv,k);
-  out.push([],['Party-wise summary'],['Party','Count','Qty','Goods','Without GST','With GST','Party total']);
-  P.forEach(x=>out.push([x.name,x.count,x.qty,x.sub,x.E,x.G,x.total]));
-  out.push(['All parties',k.count,k.qty,k.sub,k.E,k.G,k.total]);
+  out.push([],['Party-wise summary'],['Party','Count','Qty','Avg rate','Goods','Without GST','With GST','Party total']);
+  P.forEach(x=>out.push([x.name,x.count,x.qty,x.qty?r2(x.avg):'',x.sub,x.E,x.G,x.total]));
+  out.push(['All parties',k.count,k.qty,k.qty?r2(k.avg):'',k.sub,k.E,k.G,k.total]);
   P.forEach(x=>{out.push([],['Charges & GST: '+x.name]);partyRows(inv,x,true).forEach(r=>out.push([r.letter,r.label,r.note||'','','','',r.kind==='charge'?r.rate:'',r.amt]))});
   return '\uFEFF'+out.map(r=>r.map(q).join(',')).join('\r\n');
 }
@@ -753,10 +757,10 @@ function partySummaryHTML(inv,k){
   const P=partyCalc(inv,k);
   if(!P.length)return'<div class="hint">Totals per party appear once you add entries.</div>';
   const c=(l,v)=>`<span class="r" data-l="${l}">${v}</span>`;
-  const items=P.map(p=>`<details class="pdet" data-party="${esc(p.name)}"${openParty.has(p.name)?' open':''}><summary class="psm"><span class="pn"><b>${esc(p.name)}</b></span>${c('Count',cnt(p.count))}${c('Qty',nf2.format(p.qty))}${c('Goods',money(p.sub))}${c('Without GST',money(p.E))}${c('With GST',money(p.G))}${c('Party total',money(p.total))}</summary><div class="pbody">${partyRows(inv,p,false).map(partyRowHTML).join('')}</div></details>`).join('');
-  return`<div class="ptools"><button class="btn sm" data-act="pt-open">Expand all</button><button class="btn sm" data-act="pt-close">Collapse all</button><span class="hint">Tap a party to see its share of the charges and GST. Without GST = goods + charges added before GST; With GST = that plus GST.</span></div>
-  <div class="pgrid"><div class="phd"><span>Party</span><span class="r">Count</span><span class="r">Qty</span><span class="r">Goods</span><span class="r">Without GST</span><span class="r">With GST</span><span class="r">Party total</span></div>${items}
-  <div class="pall"><span class="pn">All parties</span>${c('Count',cnt(k.count))}${c('Qty',nf2.format(k.qty))}${c('Goods',money(k.sub))}${c('Without GST',money(k.E))}${c('With GST',money(k.G))}${c('Invoice total',nf0.format(k.total))}</div></div>`;
+  const items=P.map(p=>`<details class="pdet" data-party="${esc(p.name)}"${openParty.has(p.name)?' open':''}><summary class="psm"><span class="pn"><b>${esc(p.name)}</b></span>${c('Count',cnt(p.count))}${c('Qty',nf2.format(p.qty))}${c('Avg rate',avgTxt(p))}${c('Goods',money(p.sub))}${c('Without GST',money(p.E))}${c('With GST',money(p.G))}${c('Party total',money(p.total))}</summary><div class="pbody">${partyRows(inv,p,false).map(partyRowHTML).join('')}</div></details>`).join('');
+  return`<div class="ptools"><button class="btn sm" data-act="pt-open">Expand all</button><button class="btn sm" data-act="pt-close">Collapse all</button><span class="hint">Tap a party to see its share of the charges and GST. Avg rate = Goods ÷ Qty (weighted by quantity). Without GST = goods + charges added before GST; With GST = that plus GST.</span></div>
+  <div class="pgrid"><div class="phd"><span>Party</span><span class="r">Count</span><span class="r">Qty</span><span class="r">Avg rate</span><span class="r">Goods</span><span class="r">Without GST</span><span class="r">With GST</span><span class="r">Party total</span></div>${items}
+  <div class="pall"><span class="pn">All parties</span>${c('Count',cnt(k.count))}${c('Qty',nf2.format(k.qty))}${c('Avg rate',avgTxt(k))}${c('Goods',money(k.sub))}${c('Without GST',money(k.E))}${c('With GST',money(k.G))}${c('Invoice total',nf0.format(k.total))}</div></div>`;
 }
 function updateTotals(){
   if(view!=='bill')return;
@@ -812,7 +816,7 @@ function renderSec(){
     <section class="card stack"><h2>Entries & numbering</h2>
     <div class="three">${setField('settings.factor','Default factor','number','step="any"')}${setField('settings.prefix','Bill number prefix (e.g. HT/26-27/)')}${setField('settings.nextNo','Next bill number','number','step="1" min="1"')}</div>
     ${setCheck('settings.titleProducts','Add the product name(s) to the bill title, e.g. “PURCHASE BILL - Soya”')}
-    ${setCheck('settings.partySummary','Print a party-wise summary table at the end of the bill (Goods, Without GST, With GST, Total)')}
+    ${setCheck('settings.partySummary','Print a party-wise summary table at the end of the bill (Qty, Avg Rate, Goods, Without GST, With GST, Total)')}
     ${setCheck('settings.partyBreakup','Also print each party’s charges and GST breakup below that summary (needs the option above)')}
     <div class="hint">Factor is controlled here in Settings and is not editable while making an invoice. Qty is calculated automatically from Count × Factor. On screen, every party in “Party-wise totals” has its own toggle showing its share of the charges and GST.</div></section>`;
   }else if(settingsSec==='parties'){
