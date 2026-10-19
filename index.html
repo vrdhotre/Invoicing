@@ -279,7 +279,7 @@ function seed(){
   const other={id:uid(),name:'Other',gst:0};
   const ch=(name,basis,rate,group)=>({id:uid(),name,basis,rate,group,hideZero:false});
   const ty={id:uid(),name:'PURCHASE BILL'};
-  const ty2={id:uid(),name:'Commission SALES BILL'};
+  const ty2={id:uid(),name:'COMMISSION SALES BILL'};
   return{
     schemaVersion:3,
     settings:{business:{name:'HIBARE TRADERS',address:'APMC Yard, Bidar 585403',phone:'',gstin:'',footer:''},
@@ -305,7 +305,7 @@ function migrateDB(db){
   if((db.schemaVersion||0)<3){
     /* add the SALES BILL type for data saved before it existed (keeps the existing default) */
     const types=db.settings.invoiceTypes;
-    if(!types.some(t=>String(t.name||'').trim().toUpperCase()==='SALES BILL'))types.push({id:uid(),name:'SALES BILL'});
+    if(!types.some(t=>String(t.name||'').trim().toUpperCase()==='COMMISSION SALES BILL'))types.push({id:uid(),name:'COMMISSION SALES BILL'});
     db.schemaVersion=3;
     changed=true;
   }
